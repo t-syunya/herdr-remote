@@ -1,4 +1,4 @@
-# Herdr API Spike
+# Herdr API 実機調査
 
 ## 調査状況
 
@@ -10,20 +10,20 @@
 アダプターやアプリケーションコードはまだ実装していない。
 以下では「実測」「スキーマ」「公式説明」「提案」を区別する。
 
-## Environment
+## 環境
 
-| 項目 | 確認結果 |
-| --- | --- |
-| macOS | 26.6.2 / build 25G83 |
-| CLI / 稼働サーバー | Herdr 0.8.2 / protocol 20 |
-| インストール | Homebrew。`/opt/homebrew/bin/herdr` → `../Cellar/herdr/0.8.2/bin/herdr` |
-| 既存セッションの API socket | `$HOME/.config/herdr/herdr.sock` |
-| 実行コンテキスト | `HERDR_ENV=1` |
-| 検証用 API socket | `/tmp/herdr-phase0/herdr.sock` |
-| 検証用 client socket | `/tmp/herdr-phase0/herdr-client.sock`（API 接続先に使わない） |
-| 検証用設定 | `HERDR_CONFIG_PATH=/tmp/herdr-phase0/config.toml` |
-| 検証用セッション | `HERDR_SESSION=phase0-spike` |
-| スキーマ | `schema_version=1`、request method 91 個 |
+| 項目                        | 確認結果                                                                |
+| --------------------------- | ----------------------------------------------------------------------- |
+| macOS                       | 26.6.2 / build 25G83                                                    |
+| CLI / 稼働サーバー          | Herdr 0.8.2 / protocol 20                                               |
+| インストール                | Homebrew。`/opt/homebrew/bin/herdr` → `../Cellar/herdr/0.8.2/bin/herdr` |
+| 既存セッションの API socket | `$HOME/.config/herdr/herdr.sock`                                        |
+| 実行コンテキスト            | `HERDR_ENV=1`                                                           |
+| 検証用 API socket           | `/tmp/herdr-phase0/herdr.sock`                                          |
+| 検証用 client socket        | `/tmp/herdr-phase0/herdr-client.sock`（API 接続先に使わない）           |
+| 検証用設定                  | `HERDR_CONFIG_PATH=/tmp/herdr-phase0/config.toml`                       |
+| 検証用セッション            | `HERDR_SESSION=phase0-spike`                                            |
+| スキーマ                    | `schema_version=1`、request method 91 個                                |
 
 `herdr api schema --json` の出力 SHA-256:
 
@@ -44,44 +44,44 @@ c48f1f54ee0150ca27e11fd44455fe94aeadb20fdf4e4a62393ed822a4e5b150
 検証用セッションのログ・永続状態は設定ファイルの指定とは別に
 `$HOME/.config/herdr/sessions/phase0-spike/` に作られた。
 
-## Schema / capabilities
+## スキーマと対応機能
 
-| 項目 | 結果 |
-| --- | --- |
-| Workspace / Tab / Pane | 実サーバーで作成、一覧、参照関係を確認 |
-| Pane read | 4 source、行数制限、ANSI を確認 |
-| text input | 日本語・改行を PTY の受信バイトで確認 |
-| special keys | Enter / Escape / Ctrl+C / 矢印 4 種を確認 |
-| Agent list / get / read | 既存 Agent とテスト用の状態報告で確認 |
-| Agent prompt | 不在・前景プロセス不一致・blocked の拒否、実 Agent への送信成功・完了待ちを確認 |
-| events | subscribe の応答・状態変化の配信・wait の制約を確認 |
-| lifecycle | クライアント切断、停止中の接続失敗、再起動後の再接続を確認 |
+| 項目                    | 結果                                                                            |
+| ----------------------- | ------------------------------------------------------------------------------- |
+| Workspace / Tab / Pane  | 実サーバーで作成、一覧、参照関係を確認                                          |
+| Pane read               | 4 source、行数制限、ANSI を確認                                                 |
+| text input              | 日本語・改行を PTY の受信バイトで確認                                           |
+| special keys            | Enter / Escape / Ctrl+C / 矢印 4 種を確認                                       |
+| Agent list / get / read | 既存 Agent とテスト用の状態報告で確認                                           |
+| Agent prompt            | 不在・前景プロセス不一致・blocked の拒否、実 Agent への送信成功・完了待ちを確認 |
+| events                  | subscribe の応答・状態変化の配信・wait の制約を確認                             |
+| lifecycle               | クライアント切断、停止中の接続失敗、再起動後の再接続を確認                      |
 
-### MVP に関係する raw methods
+### MVP に関係する生 API のメソッド
 
-| 用途 | method / params | result |
-| --- | --- | --- |
-| 接続確認 | `ping`, `{}` | `type: "pong"`, version, protocol, capabilities |
-| Workspace 一覧 | `workspace.list`, `{}` | `type: "workspace_list"`, workspaces |
-| Tab 一覧 | `tab.list`, `{workspace_id}` | `type: "tab_list"`, tabs |
-| Pane 一覧 | `pane.list`, `{workspace_id}` | `type: "pane_list"`, panes |
-| Pane 参照 | `pane.get`, `{pane_id}` | スキーマでは `type: "pane_info"`, pane |
-| Pane 出力 | `pane.read`, `{pane_id, source, lines?, format?, strip_ansi?}` | `type: "pane_read"`, read |
-| テキスト | `pane.send_text`, `{pane_id, text}` | `type: "ok"` |
-| キー | `pane.send_keys`, `{pane_id, keys: string[]}` | `type: "ok"` |
-| テキスト＋キー | `pane.send_input`, `{pane_id, text, keys}` | `type: "ok"` |
-| Agent 一覧 | `agent.list`, `{}` | `type: "agent_list"`, agents |
-| Agent メタデータ | `agent.get`, `{target}` | `type: "agent_info"`, agent |
-| Agent 出力 | `agent.read`, `{target, source, lines?, format?, strip_ansi?}` | `type: "pane_read"`, read |
-| Agent prompt | `agent.prompt`, `{target, text, wait?}` | `type: "agent_prompted"`, agent |
-| イベント購読 | `events.subscribe`, `{subscriptions}` | `type: "subscription_started"` の後にイベント |
-| イベント待ち | `events.wait`, `{match_event, timeout_ms?}` | 条件に制限あり。下記参照 |
+| 用途             | method / params                                                | result                                          |
+| ---------------- | -------------------------------------------------------------- | ----------------------------------------------- |
+| 接続確認         | `ping`, `{}`                                                   | `type: "pong"`, version, protocol, capabilities |
+| Workspace 一覧   | `workspace.list`, `{}`                                         | `type: "workspace_list"`, workspaces            |
+| Tab 一覧         | `tab.list`, `{workspace_id}`                                   | `type: "tab_list"`, tabs                        |
+| Pane 一覧        | `pane.list`, `{workspace_id}`                                  | `type: "pane_list"`, panes                      |
+| Pane 参照        | `pane.get`, `{pane_id}`                                        | スキーマでは `type: "pane_info"`, pane          |
+| Pane 出力        | `pane.read`, `{pane_id, source, lines?, format?, strip_ansi?}` | `type: "pane_read"`, read                       |
+| テキスト         | `pane.send_text`, `{pane_id, text}`                            | `type: "ok"`                                    |
+| キー             | `pane.send_keys`, `{pane_id, keys: string[]}`                  | `type: "ok"`                                    |
+| テキスト＋キー   | `pane.send_input`, `{pane_id, text, keys}`                     | `type: "ok"`                                    |
+| Agent 一覧       | `agent.list`, `{}`                                             | `type: "agent_list"`, agents                    |
+| Agent メタデータ | `agent.get`, `{target}`                                        | `type: "agent_info"`, agent                     |
+| Agent 出力       | `agent.read`, `{target, source, lines?, format?, strip_ansi?}` | `type: "pane_read"`, read                       |
+| Agent prompt     | `agent.prompt`, `{target, text, wait?}`                        | `type: "agent_prompted"`, agent                 |
+| イベント購読     | `events.subscribe`, `{subscriptions}`                          | `type: "subscription_started"` の後にイベント   |
+| イベント待ち     | `events.wait`, `{match_event, timeout_ms?}`                    | 条件に制限あり。下記参照                        |
 
 `workspace.get/focus`、`tab.get/focus`、`pane.focus`、`agent.focus/wait`、
 `session.snapshot` もスキーマに存在するが、この調査ではすべての成功経路は実行していない。
 MVP 外の method 全数について動作保証するものではない。
 
-## Transport: 実測
+## 通信方式の実測
 
 - Unix domain stream socket 上で UTF-8 の newline-delimited JSON を送る。
 - request は `{id: string, method: string, params: object}`。`jsonrpc` フィールドはない。
@@ -103,7 +103,7 @@ MVP 外の method 全数について動作保証するものではない。
 以下の識別子・パス・表示文字列を含む例は検証用の値に置換、または任意フィールドを省略した。
 秘密情報、既存 Agent のプロンプトや出力は記録しない。
 
-## Identifiers and relationships
+## 識別子と参照関係
 
 実測した作成応答では `workspace.create` の result に `workspace`, `tab`, `root_pane`
 が同時に含まれる。返却された ID を後続 request に使った。
@@ -124,7 +124,7 @@ MVP 外の method 全数について動作保証するものではない。
   `agent` フィールドの `codex` 等は種類で、個体 ID ではない。
 - 初回 Workspace は `focus:false` 指定でも、唯一の Workspace として `focused:true` だった。
 
-## Pane read behavior
+## ペイン出力の読み取り動作
 
 ```json
 {"id":"read1","method":"pane.read","params":{"pane_id":"w1:p1","source":"recent_unwrapped","lines":200,"format":"text","strip_ansi":true}}
@@ -133,12 +133,12 @@ MVP 外の method 全数について動作保証するものではない。
 
 この例の `text` は短縮した検証用出力。
 
-| raw source | 実測と用途 |
-| --- | --- |
-| `visible` | viewport 内のスナップショット。100 行の出力後、先頭マーカーは含まれない |
-| `recent` | scrollback を含む描画行。200 行指定で先頭・末尾マーカーを取得 |
-| `recent_unwrapped` | soft wrap を連結した出力。240 文字の長い行で `recent` と差を確認 |
-| `detection` | 検出用の下部スナップショット。この実験では viewport と同じ範囲 |
+| raw source         | 実測と用途                                                              |
+| ------------------ | ----------------------------------------------------------------------- |
+| `visible`          | viewport 内のスナップショット。100 行の出力後、先頭マーカーは含まれない |
+| `recent`           | scrollback を含む描画行。200 行指定で先頭・末尾マーカーを取得           |
+| `recent_unwrapped` | soft wrap を連結した出力。240 文字の長い行で `recent` と差を確認        |
+| `detection`        | 検出用の下部スナップショット。この実験では viewport と同じ範囲          |
 
 - 差分や端末フレームではなく `text` のスナップショット。更新時は置換する。
 - `lines:5` は末尾側を返し `truncated:true`、`lines:200` は `false` だった。
@@ -151,9 +151,9 @@ MVP 外の method 全数について動作保証するものではない。
 - Alternate screen の消えた行は通常の scrollback から回復できないとの公式説明がある。
   この制約自体の実験は未実施。履歴の完全取得を MVP の契約にしない。
 
-## Input behavior
+## 入力動作
 
-### Text
+### テキスト
 
 `pane.send_text` は日本語 UTF-8 と LF をそのまま PTY に送った。
 `日本語 phase0\nsecond` の末尾に Enter の自動追加はなかった。
@@ -166,26 +166,26 @@ MVP 外の method 全数について動作保証するものではない。
 `pane.send_text` の受信バイトには paste の開始・終了ラッパーが付かなかった。
 `pane.send_text` と `agent.prompt` を同じ操作とみなさない。
 
-### Special keys
+### 特殊キー
 
 以下は raw mode / 通常カーソルモードで確認した実バイト。アダプターはバイトを自作せず、
 Herdr の論理キー名へ変換する。アプリ側の名称は今後定義する。
 
-| UI | Herdr key | hex |
-| --- | --- | --- |
-| Enter | `enter` | `0d` |
-| Escape | `esc` | `1b` |
-| Ctrl+C | `ctrl+c` | `03` |
-| Arrow Up | `up` | `1b 5b 41` |
-| Arrow Down | `down` | `1b 5b 42` |
-| Arrow Left | `left` | `1b 5b 44` |
-| Arrow Right | `right` | `1b 5b 43` |
+| UI          | Herdr key | hex        |
+| ----------- | --------- | ---------- |
+| Enter       | `enter`   | `0d`       |
+| Escape      | `esc`     | `1b`       |
+| Ctrl+C      | `ctrl+c`  | `03`       |
+| Arrow Up    | `up`      | `1b 5b 41` |
+| Arrow Down  | `down`    | `1b 5b 42` |
+| Arrow Left  | `left`    | `1b 5b 44` |
+| Arrow Right | `right`   | `1b 5b 43` |
 
 `keys:["up","phase0-invalid-key"]` は `invalid_key` を返した。
 受信ファイルに追加バイトはなく、先頭の有効キーだけが送られることもなかった。
 Ctrl+C は raw mode で byte `03` を確認したもので、任意のプロセス停止を保証しない。
 
-## Agent behavior
+## エージェントの動作
 
 実際の既存セッションには 4 Agent があり、`idle`, `blocked`, `done` を観測した。
 既存 Agent への `agent.read` が `result.type:"pane_read"` と `read` を返すことを確認した。
@@ -198,24 +198,34 @@ Ctrl+C は raw mode で byte `03` を確認したもので、任意のプロセ�
 省略した AgentInfo の例:
 
 ```json
-{"terminal_id":"term_example","agent":"codex","agent_status":"idle","workspace_id":"w1","tab_id":"w1:t1","pane_id":"w1:p1","focused":true,"state_change_seq":1,"revision":1}
+{
+  "terminal_id": "term_example",
+  "agent": "codex",
+  "agent_status": "idle",
+  "workspace_id": "w1",
+  "tab_id": "w1:t1",
+  "pane_id": "w1:p1",
+  "focused": true,
+  "state_change_seq": 1,
+  "revision": 1
+}
 ```
 
 `name`, `title`, `display_agent`, `interactive_ready` 等は省略され得る。
 スキーマ上の任意フィールドを必須扱いしない。
 
-| raw status | アプリの正規化案 | 注意 |
-| --- | --- | --- |
-| `idle` | `idle` | 入力待ち |
-| `working` | `working` | 作業中 |
-| `blocked` | `blocked` | 承認や質問等の対話が必要 |
-| `done` | `done` | 公式説明では、非表示の間に作業終了した未確認の idle |
-| `unknown` / 未知の値 | `unknown` | 完了とは解釈しない |
+| raw status           | アプリの正規化案 | 注意                                                |
+| -------------------- | ---------------- | --------------------------------------------------- |
+| `idle`               | `idle`           | 入力待ち                                            |
+| `working`            | `working`        | 作業中                                              |
+| `blocked`            | `blocked`        | 承認や質問等の対話が必要                            |
+| `done`               | `done`           | 公式説明では、非表示の間に作業終了した未確認の idle |
+| `unknown` / 未知の値 | `unknown`        | 完了とは解釈しない                                  |
 
 公式説明では focus 操作が `done` を既読の `idle` に変え、read は既読にしない。
 リモート UI 内の選択と Herdr の focus 操作をどう結びつけるかは実装前に決める。
 
-### Prompt の確認範囲
+### プロンプトの確認範囲
 
 - Agent のいない Pane: `agent_not_found`。
 - 状態報告だけで Agent として登録した Python 受信プロセス: `agent_not_ready`。
@@ -231,13 +241,39 @@ Ctrl+C は raw mode で byte `03` を確認したもので、任意のプロセ�
 実送信 request:
 
 ```json
-{"id":"phase0-real-prompt","method":"agent.prompt","params":{"target":"phase0-check","text":"This is a transport verification. Do not use tools or modify files.\nReply with exactly: PHASE0_OK","wait":{"timeout_ms":60000}}}
+{
+  "id": "phase0-real-prompt",
+  "method": "agent.prompt",
+  "params": {
+    "target": "phase0-check",
+    "text": "This is a transport verification. Do not use tools or modify files.\nReply with exactly: PHASE0_OK",
+    "wait": { "timeout_ms": 60000 }
+  }
+}
 ```
 
 約 6.31 秒後の応答（表示文字列・terminal ID を置換、一部の任意フィールドを省略）:
 
 ```json
-{"id":"phase0-real-prompt","result":{"type":"agent_prompted","agent":{"terminal_id":"term_example","name":"phase0-check","agent":"codex","agent_status":"idle","workspace_id":"w1","tab_id":"w1:t1","pane_id":"w1:p1","focused":true,"interactive_ready":true,"state_change_seq":5,"revision":44}}}
+{
+  "id": "phase0-real-prompt",
+  "result": {
+    "type": "agent_prompted",
+    "agent": {
+      "terminal_id": "term_example",
+      "name": "phase0-check",
+      "agent": "codex",
+      "agent_status": "idle",
+      "workspace_id": "w1",
+      "tab_id": "w1:t1",
+      "pane_id": "w1:p1",
+      "focused": true,
+      "interactive_ready": true,
+      "state_change_seq": 5,
+      "revision": 44
+    }
+  }
+}
 ```
 
 送信前の `state_change_seq` は 3、完了後は 5。`agent.read` で prompt 本文とは
@@ -249,7 +285,7 @@ Ctrl+C は raw mode で byte `03` を確認したもので、任意のプロセ�
 Phase 2 の追加検証対象。wait は個々のターンを識別する保証ではなく、
 公式 CLI 説明上、既に working なら進行中ターンの終了でも成立し得る。
 
-## Events
+## イベント
 
 実測した購読:
 
@@ -271,23 +307,23 @@ Phase 2 の追加検証対象。wait は個々のターンを識別する保証�
 
 MVP は polling で進める提案。購読や wait を MVP の必須機能にしない。
 
-## Failure / lifecycle behavior
+## 障害時とライフサイクルの動作
 
-| 条件 | 実測 |
-| --- | --- |
-| 存在しない／閉鎖済み Pane | `pane_not_found`、request ID は保持 |
-| Agent 不在 | `agent_not_found` |
-| Agent の前景不一致 | `agent_not_ready` |
-| Agent が blocked | `agent_blocked` |
-| 無効なキー | `invalid_key`、部分入力なし |
-| 未知の method | `invalid_request`、`id:""` |
-| 壊れた JSON / id 欠落 | `invalid_request`、`id:""` |
-| raw source に `recent-unwrapped` | `invalid_request`。正しい値は `recent_unwrapped` |
-| 未対応の wait 条件 | `unsupported_event_wait_match` |
-| wait の時間切れ | `timeout` |
-| JSON を途中まで送ってクライアント切断 | 後続の新規 `ping` は成功 |
-| 検証サーバー停止完了後 | socket が消え、新規接続は `ENOENT` |
-| 検証サーバー再起動後 | 同一パスで新規 `ping`、一覧取得が成功 |
+| 条件                                  | 実測                                             |
+| ------------------------------------- | ------------------------------------------------ |
+| 存在しない／閉鎖済み Pane             | `pane_not_found`、request ID は保持              |
+| Agent 不在                            | `agent_not_found`                                |
+| Agent の前景不一致                    | `agent_not_ready`                                |
+| Agent が blocked                      | `agent_blocked`                                  |
+| 無効なキー                            | `invalid_key`、部分入力なし                      |
+| 未知の method                         | `invalid_request`、`id:""`                       |
+| 壊れた JSON / id 欠落                 | `invalid_request`、`id:""`                       |
+| raw source に `recent-unwrapped`      | `invalid_request`。正しい値は `recent_unwrapped` |
+| 未対応の wait 条件                    | `unsupported_event_wait_match`                   |
+| wait の時間切れ                       | `timeout`                                        |
+| JSON を途中まで送ってクライアント切断 | 後続の新規 `ping` は成功                         |
+| 検証サーバー停止完了後                | socket が消え、新規接続は `ENOENT`               |
+| 検証サーバー再起動後                  | 同一パスで新規 `ping`、一覧取得が成功            |
 
 ```json
 {"id":"bad-target","error":{"code":"pane_not_found","message":"pane w999:p999 not found"}}
@@ -311,7 +347,7 @@ MVP は polling で進める提案。購読や wait を MVP の必須機能に�
 - timeout、応答サイズ上限、JSON 検証をアダプターに実装する。
   壊れた「サーバー応答」の処理は本調査では未実装で、Phase 2 の transport テスト対象。
 
-## Documentation / assumption differences
+## ドキュメント・当初の想定との差異
 
 比較元:
 [公式 Socket API](https://herdr.dev/docs/socket-api/)、
@@ -329,9 +365,9 @@ MVP は polling で進める提案。購読や wait を MVP の必須機能に�
 8. `agent.prompt` には前景プロセス検査があり、単なる text 送信の別名ではない。
 9. `agent.read` の成功 result は `agent_read` ではなく `pane_read`。メタデータは `agent.get` で取得する。
 10. unknown method の実エラーに `pane.graphics.stream` が列挙されたが、
-   bundled request schema の 91 method には含まれていない。MVP 外なので使用しない。
+    bundled request schema の 91 method には含まれていない。MVP 外なので使用しない。
 
-## Adapter decisions resulting from spike
+## 実機調査に基づくアダプターの設計方針
 
 Phase 2 向けの提案。公開 API の実装・変更をこの調査で確定するものではない。
 

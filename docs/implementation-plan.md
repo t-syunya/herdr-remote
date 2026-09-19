@@ -1,53 +1,37 @@
-# Implementation Plan
+# 実装計画
 
-## Phase 0: Herdr API spike
+## Phase 0: Herdr API の実機調査
 
-Do this before coding the adapter against assumptions.
+アダプターを想定だけで実装する前に、必ず実施する。
 
-Status (2026-09-18): **完了**。実機 0.8.2 で socket、Pane 入出力、特殊キー、
-Agent 読み取り・実 prompt 送信・完了待ち、イベント、停止・再接続を確認済み。
-詳細、確認範囲、Phase 2 向けの提案は
-[`herdr-api-spike.md`](herdr-api-spike.md) を参照。
+状況（2026-09-18）: **完了**。実機 0.8.2 でソケット、ペインの入出力、特殊キー、エージェントの読み取り・実際のプロンプト送信・完了待ち、イベント、停止・再接続を確認済み。詳細、確認範囲、Phase 2 向けの提案は [`herdr-api-spike.md`](herdr-api-spike.md) を参照。
 
-### Verify
+### 確認項目
 
-- installed Herdr API schema
-- local socket path and lifecycle
-- workspace/tab/pane identifiers and relationships
-- pane read/output behavior
-- text input behavior
-- special-key behavior
-- agent list/read/prompt behavior if supported by the installed version
-- event/subscription behavior if useful
-- reconnect/restart/disconnect failure modes
+- インストール済み Herdr の API スキーマ
+- ローカルソケットのパスとライフサイクル
+- ワークスペース・タブ・ペインの識別子と関係
+- ペイン出力の読み取り動作
+- テキスト入力と特殊キー入力の動作
+- インストール済み版が対応するエージェントの一覧・読み取り・プロンプト送信
+- 有用であればイベント・購読の動作
+- 再接続・再起動・切断時の失敗パターン
 
-### Deliverable
+### 成果物
 
-Create `docs/herdr-api-spike.md` with:
+`docs/herdr-api-spike.md` に、インストール済み Herdr のバージョン、観測した API メソッド、秘密情報を除いたリクエスト・レスポンスの例、確認済みのソケット動作、ドキュメントや当初の想定との非互換点、アダプター実装前に必要な決定事項を記録する。
 
-- installed Herdr version
-- observed API methods
-- example sanitized request/response shapes
-- confirmed socket behavior
-- incompatibilities with docs or assumptions
-- decisions required before adapter implementation
+## Phase 1: モノレポの基盤構築
 
-## Phase 1: Monorepo bootstrap
+pnpm workspace を使ったアプリケーション・パッケージの実体を作成する。
 
-Create the actual packages/apps with pnpm workspace.
+状況（2026-09-19）: **完了**。今回の範囲は TypeScript / React / Vite / Hono の開発基盤と health RPC の接続確認まで。Herdr アダプターと操作 UI は後続 Phase で実装する。
 
-Status (2026-09-19): **完了**。今回の範囲は TypeScript / React / Vite / Hono の
-開発基盤と health RPC の接続確認まで。Herdr アダプターと操作 UI は後続 Phase で実装する。
+役割分担: Astra が設計・レビュー、Terra が実装と修正、Luna が lint / format と必要な検証コマンドの実行を担当する。
 
-役割分担: Astra が設計・レビュー、Terra が実装と修正、Luna が lint / format と
-必要な検証コマンドの実行を担当する。
+確認済み: pnpm install、typecheck、build、lint、format:check、git diff --check。ブラウザーで health RPC 接続成功と API 停止時のエラー表示を確認した。Astra の最終レビューで Medium 以上の問題はなかった。Phase 1 には自動テストスイートを追加していない。境界の回帰テストは Phase 2 以降で追加する。
 
-確認済み: pnpm install、typecheck、build、lint、format:check、git diff --check。
-ブラウザーで health RPC 接続成功と API 停止時のエラー表示を確認した。
-Astra の最終レビューで Medium 以上の問題はなかった。
-Phase 1 には自動テストスイートを追加していない。境界の回帰テストは Phase 2 以降で追加する。
-
-Target shape:
+目標の構成:
 
 ```text
 apps/
@@ -58,94 +42,92 @@ packages/
   shared/
 ```
 
-Keep dependencies minimal.
+依存関係は最小限に保つ。
 
-## Phase 2: `packages/herdr` adapter
+## Phase 2: `packages/herdr` アダプター
 
-Implement from the verified spike.
+実機調査で確認した内容に基づいて実装する。
 
-Suggested order:
+推奨順序:
 
-1. socket transport
-2. raw request/response types
-3. error translation
-4. workspace/tab/pane domain models and mappers
-5. read pane
-6. send text
-7. special-key mapping
-8. agent operations
-9. normalization tests
+1. ソケットトランスポート
+2. 生のリクエスト・レスポンス型
+3. エラー変換
+4. ワークスペース・タブ・ペインのドメインモデルとマッパー
+5. ペイン出力の読み取り
+6. テキスト送信
+7. 特殊キーのマッピング
+8. エージェント操作
+9. 正規化のテスト
 
-Do not expose raw Herdr types from the package public entrypoint.
+パッケージの公開エントリーポイントから Herdr の生 API 型を公開してはいけない。
 
-## Phase 3: Hono RPC server
+## Phase 3: Hono RPC サーバー
 
-Expose only the operations needed by the MVP.
+MVP に必要な操作だけを公開する。
 
-Likely groups:
+想定するグループ:
 
-- session/navigation state
-- panes
-- agents
-- input/actions
-- health/status
+- セッション・ナビゲーション状態
+- ペイン
+- エージェント
+- 入力・操作
+- health・状態
 
-Use application models returned by `packages/herdr`.
+`packages/herdr` が返すアプリケーションモデルを使用する。
 
-## Phase 4: Mobile web UI
+## Phase 4: モバイル Web UI
 
-Build the smallest usable one-screen flow.
+最小限で使える 1 画面のフローを作る。
 
-Required UX:
+必須の UX:
 
-- tap to choose workspace/tab/pane/agent
-- readable output area
-- text input and send
-- one-tap Enter/Escape/Ctrl+C/arrows
-- clear connection/error state
-- normalized agent state
+- タップによるワークスペース・タブ・ペイン・エージェントの選択
+- 読みやすい出力領域
+- テキストの入力・送信
+- Enter / Escape / Ctrl+C / 矢印キーをワンタップで送信
+- 明確な接続・エラー状態
+- 正規化したエージェント状態
 
-Prioritize iPhone ergonomics over desktop density.
+デスクトップ向けの情報密度より、iPhone での操作しやすさを優先する。
 
-## Phase 5: Tailscale access
+## Phase 5: Tailscale 経由のアクセス
 
-Expose only the web/backend service over Tailscale.
+Tailscale へ公開するのは web/backend サービスだけにする。Termius を使わず iPhone から MVP が動作することを確認する。
 
-Validate from the iPhone that the MVP works without Termius.
+## Phase 6: MVP の堅牢化
 
-## Phase 6: MVP hardening
+MVP 完了を宣言する前に、次を確認する。
 
-Before declaring MVP complete:
+- アダプターマッパーのテスト
+- 状態正規化のテスト
+- キーマッピングのテスト
+- API 契約の確認
+- Herdr が利用できない場合の適切な処理
+- 再接続の動作
+- モバイルレイアウトの確認
+- typecheck / lint / test / build の成功
 
-- adapter mapper tests
-- status normalization tests
-- key mapping tests
-- API contract checks
-- graceful Herdr-unavailable behavior
-- reconnect behavior
-- mobile layout check
-- typecheck/lint/test/build green
+## MVP の完了条件
 
-## MVP Definition of Done
+Tailscale に接続した iPhone から、Termius を使わずに次ができる。
 
-From an iPhone connected through Tailscale, without Termius, the user can:
+1. Herdr Remote UI を開く
+2. 操作対象のエージェントまたはペインを特定して選ぶ
+3. 出力を見る
+4. テキストを送信する
+5. 主要な特殊キーを送信する
+6. 対象が `working`、`idle`、`blocked`、`done`、`unknown` のどれかを理解する
 
-1. open the Herdr Remote UI
-2. identify and select the intended Agent/Pane
-3. view its output
-4. send text
-5. send major special keys
-6. understand whether the target is working/idle/blocked/done/unknown
+## MVP 後
 
-## Post-MVP
+MVP がエンドツーエンドで動作してから、次を検討する。
 
-Only after MVP works end-to-end, consider:
-
-- PWA installation
-- realtime WebSocket/SSE updates
-- notifications
-- custom shortcuts
-- prompt templates
-- pane split/create/close
-- richer workspace controls
-- persistent preferences/history if a concrete need emerges
+- PWA のインストール
+- WebSocket / SSE によるリアルタイム更新
+- 通知
+- カスタムショートカット
+- プロンプトテンプレート
+- ペインの分割・作成・終了
+- より充実したワークスペース操作
+- 具体的な必要性が生じた場合の設定・履歴の永続化

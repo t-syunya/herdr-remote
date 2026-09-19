@@ -1,24 +1,24 @@
 # `packages/herdr`
 
-Herdr integration adapter / anti-corruption layer.
+Herdr と連携するためのアダプター兼腐敗防止層です。
 
-## Owns
+## 担当する処理
 
-- Herdr local socket transport
-- raw Herdr method names
-- raw request/response types
-- compatibility handling
-- raw -> stable domain mapping
-- status normalization
-- special-key mapping
-- Herdr-specific error translation
+- Herdr のローカルソケット通信
+- Herdr の生のメソッド名
+- 生のリクエスト・レスポンス型
+- 互換性への対応
+- 生データから安定したドメインモデルへの変換
+- 状態の正規化
+- 特殊キーのマッピング
+- Herdr 固有のエラーの変換
 
-## Must not leak
+## 外部に公開してはいけないもの
 
-Do not export raw Herdr payload types to `apps/server`, `apps/web`, or `packages/shared`.
+Herdr の生ペイロードの型を `apps/server`、`apps/web`、`packages/shared` に公開してはいけません。
 
-The public package API should expose stable application-oriented models and operations only.
+パッケージの公開 API は、アプリケーション向けの安定したモデルと操作だけを提供します。
 
-## Implementation prerequisite
+## 実装の前提条件
 
-Do not finalize the public adapter API until `docs/herdr-api-spike.md` contains real observations from the installed Herdr version.
+`docs/herdr-api-spike.md` にインストール済み Herdr の実機観測結果が記録されるまでは、アダプターの公開 API を確定しないでください。

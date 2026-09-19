@@ -1,15 +1,15 @@
 # `apps/server`
 
-Hono backend and Hono RPC contract.
+Hono によるバックエンドと Hono RPC の API 契約を提供します。
 
-## Responsibilities
+## 責務
 
-- expose application-facing RPC routes
-- validate browser inputs
-- call the stable `packages/herdr` adapter API
-- translate adapter errors into application/API errors
-- compose application use cases
+- アプリケーション向けの RPC ルートを公開する
+- ブラウザーからの入力を検証する
+- `packages/herdr` の安定したアダプター API を呼び出す
+- アダプターのエラーをアプリケーション・API のエラーに変換する
+- アプリケーションのユースケースを組み立てる
 
-## Boundary rule
+## 境界のルール
 
-This app must not parse Herdr raw payloads, know Herdr socket method names, or depend on raw Herdr types.
+Herdr の生ペイロードを解析したり、ソケットのメソッド名を扱ったり、生 API 型に依存したりしてはいけません。

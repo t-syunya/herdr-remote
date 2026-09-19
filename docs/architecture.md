@@ -1,17 +1,17 @@
-# Architecture
+# アーキテクチャ
 
-## Goal
+## 目的
 
-Provide a mobile-first control surface for Herdr running on a Mac and reachable from an iPhone over Tailscale.
+Mac で動作する Herdr を、Tailscale 経由で iPhone から操作するためのモバイルファーストなコントロール画面を提供する。
 
-The primary UX problem is that direct terminal/TUI control from a phone is awkward: tapping terminal tabs is unreliable and modifier-key combinations are cumbersome.
+主な UX 上の課題は、スマートフォンからターミナル/TUI を直接操作しにくいことにある。ターミナルタブのタップは信頼性に欠け、修飾キーの組み合わせも扱いづらい。
 
-The product therefore treats Herdr as a backend rather than trying to reproduce the Herdr TUI remotely.
+そのため本プロダクトでは、Herdr TUI をリモートで再現しようとするのではなく、Herdr をバックエンドとして扱う。
 
-## System overview
+## システム概要
 
 ```text
-iPhone / Safari or PWA
+iPhone / Safari または PWA
         |
         | Tailscale
         v
@@ -23,140 +23,135 @@ React + Vite + TypeScript
 apps/server
 Hono + TypeScript
         |
-        | stable adapter API
+        | 安定したアダプター API
         v
 packages/herdr
         |
-        | local Herdr socket protocol
+        | ローカル Herdr ソケットプロトコル
         v
 Herdr
 ```
 
-## Responsibility boundaries
+## 責務の境界
 
 ### `apps/web`
 
-Responsible for mobile UX only.
+モバイル UX のみを担う。
 
-- workspace/tab/pane/agent selection
-- output rendering
-- text input
-- special-key buttons
-- application-level status presentation
+- ワークスペース/タブ/ペイン/エージェントの選択
+- 出力の描画
+- テキスト入力
+- 特殊キーボタン
+- アプリケーションレベルのステータス表示
 
-It must not understand Herdr socket messages or raw Herdr response types.
+Herdr のソケットメッセージや生の Herdr レスポンス型を理解してはならない。
 
 ### `apps/server`
 
-Responsible for the application-facing backend contract.
+アプリケーション向けバックエンド契約を担う。
 
-- Hono RPC routes
-- input validation
-- mapping adapter errors to application/API errors
-- composition of use cases when more than one adapter call is needed
+- Hono RPC ルート
+- 入力値の検証
+- アダプターエラーからアプリケーション/API エラーへのマッピング
+- 複数のアダプター呼び出しが必要なユースケースの組み立て
 
-It must not parse Herdr raw payloads.
+Herdr の生のペイロードをパースしてはならない。
 
 ### `packages/herdr`
 
-This package is the anti-corruption layer between the app and Herdr.
+このパッケージはアプリケーションと Herdr の間に置く腐敗防止層である。
 
-It owns:
+以下を所有する。
 
-- local socket transport
-- raw Herdr request/response shapes
-- Herdr operation names
-- version-specific compatibility behavior
-- raw -> stable domain mapping
-- status normalization
-- special-key mapping
-- adapter-level errors
+- ローカルソケットトランスポート
+- 生の Herdr リクエスト/レスポンスの形式
+- Herdr の操作名
+- バージョン固有の互換性処理
+- raw -> 安定したドメインモデルへのマッピング
+- ステータスの正規化
+- 特殊キーのマッピング
+- アダプターレベルのエラー
 
-Its public exports should be deliberately small and stable.
+公開する export は意図的に小さく、安定的に保つ。
 
 ### `packages/shared`
 
-Use only for genuinely Herdr-independent code shared by web/server.
+web/server で共有する、真に Herdr 非依存のコードにのみ使用する。
 
-Do not use it as a dumping ground for raw API types.
+生の API 型を置くための場所として使ってはならない。
 
-## Domain model direction
+## ドメインモデルの方針
 
-Application code should depend on normalized models such as:
+アプリケーションコードは、次のような正規化済みモデルに依存する。
 
 ```ts
-export type AgentStatus =
-  | "idle"
-  | "working"
-  | "blocked"
-  | "done"
-  | "unknown"
+export type AgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
 
 export type Pane = {
-  id: string
-  title: string
-}
+  id: string;
+  title: string;
+};
 ```
 
-The exact fields should be finalized after the real Herdr API spike.
+正確なフィールドは、実機での Herdr API スパイク後に確定する。
 
-## Adapter interface direction
+## アダプターインターフェースの方針
 
-Likely operations include:
+想定する操作は次のとおり。
 
 ```ts
 interface HerdrClient {
-  listWorkspaces(): Promise<Workspace[]>
-  listTabs(workspaceId: string): Promise<Tab[]>
-  listPanes(tabId: string): Promise<Pane[]>
-  readPane(paneId: string): Promise<PaneOutput>
-  sendText(paneId: string, text: string): Promise<void>
-  sendKey(paneId: string, key: SpecialKey): Promise<void>
-  listAgents(): Promise<Agent[]>
-  readAgent(agentId: string): Promise<Agent>
-  sendPrompt(agentId: string, prompt: string): Promise<void>
+  listWorkspaces(): Promise<Workspace[]>;
+  listTabs(workspaceId: string): Promise<Tab[]>;
+  listPanes(tabId: string): Promise<Pane[]>;
+  readPane(paneId: string): Promise<PaneOutput>;
+  sendText(paneId: string, text: string): Promise<void>;
+  sendKey(paneId: string, key: SpecialKey): Promise<void>;
+  listAgents(): Promise<Agent[]>;
+  readAgent(agentId: string): Promise<Agent>;
+  sendPrompt(agentId: string, prompt: string): Promise<void>;
 }
 ```
 
-These are design targets, not claims about Herdr's raw API.
+これらは設計上の目標であり、Herdr の生 API に関する主張ではない。
 
-## API boundary
+## API 境界
 
-`apps/server` will expose Hono RPC so that the React client can infer server API types directly.
+`apps/server` は Hono RPC を公開し、React クライアントがサーバー API 型を直接推論できるようにする。
 
-The browser/server contract should use application-oriented models. Raw Herdr payloads must never become the browser contract.
+ブラウザーとサーバーの契約には、アプリケーション指向のモデルを用いる。生の Herdr ペイロードがブラウザーとの契約になってはならない。
 
-## Runtime/data choices
+## ランタイム/データに関する方針
 
-For MVP:
+MVP では以下を採用する。
 
-- no database
-- no persisted history
-- no generalized event store
-- no public Internet deployment
-- polling is acceptable for output/state refresh
+- データベースを持たない
+- 履歴を永続化しない
+- 汎用イベントストアを持たない
+- パブリックインターネットへのデプロイを行わない
+- 出力/状態の更新にはポーリングを許容する
 
-Post-MVP candidates:
+MVP 後の候補:
 
-- PWA installation
-- WebSocket or SSE realtime updates
-- notifications for blocked/done state
-- custom shortcut buttons
-- saved prompt templates
-- pane lifecycle controls
-- richer workspace switching
+- PWA のインストール
+- WebSocket または SSE によるリアルタイム更新
+- blocked/done 状態の通知
+- カスタムショートカットボタン
+- 保存済みプロンプトテンプレート
+- ペインのライフサイクル制御
+- より充実したワークスペース切り替え
 
-## Security model
+## セキュリティモデル
 
-The Herdr local socket remains local to the Mac.
+Herdr のローカルソケットは Mac 内にとどめる。
 
-Only the web/backend service should be reachable through Tailscale. The system must not expose the Herdr socket directly to the network or assume public Internet access.
+Tailscale 経由で到達可能にするのは web/backend サービスだけとする。Herdr ソケットを直接ネットワークへ公開したり、パブリックインターネットからのアクセスを前提にしたりしてはならない。
 
-Because control operations are effectively terminal-control capabilities, the externally reachable surface should remain minimal.
+操作には実質的にターミナル制御の能力があるため、外部から到達可能な範囲は最小限に保つ。
 
-## Error model
+## エラーモデル
 
-Normalize technical failures into application-level categories, for example:
+技術的な失敗は、可能な範囲でアプリケーションレベルの分類へ正規化する。例:
 
 - `HerdrUnavailable`
 - `TargetNotFound`
@@ -164,14 +159,14 @@ Normalize technical failures into application-level categories, for example:
 - `TransportDisconnected`
 - `InvalidHerdrResponse`
 
-The exact representation can be refined during implementation, but raw socket exceptions should stay behind `packages/herdr`.
+正確な表現は実装中に改善できるが、生のソケット例外は `packages/herdr` の内部に閉じ込める。
 
-## Compatibility principle
+## 互換性の原則
 
-When a Herdr upgrade changes raw field names, operation names, or response structure, prefer changing only:
+Herdr のアップグレードにより生のフィールド名、操作名、レスポンス構造が変わった場合は、次の箇所だけを変更することを優先する。
 
 - `packages/herdr/raw`
 - `packages/herdr/transport`
 - `packages/herdr/mappers`
 
-Keep `apps/server` and `apps/web` unchanged whenever the user-visible capability remains the same.
+ユーザーに見える機能が同じである限り、`apps/server` と `apps/web` は変更しない。

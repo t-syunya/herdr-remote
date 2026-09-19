@@ -1,11 +1,11 @@
 # `packages/shared`
 
-Herdr-independent code that is genuinely shared across apps/packages.
+アプリケーションやパッケージ間で実際に共有する、Herdr に依存しないコードを配置します。
 
-Good candidates:
+配置に適したもの:
 
-- generic application types
-- validation helpers not tied to Herdr
-- shared constants with no Herdr transport semantics
+- 汎用的なアプリケーションの型
+- Herdr に依存しない検証用ヘルパー
+- Herdr の通信仕様を含まない共通定数
 
-Do not move raw Herdr request/response types here. Those belong exclusively in `packages/herdr`.
+Herdr の生リクエスト・レスポンス型をここに移してはいけません。それらは `packages/herdr` だけが扱います。
