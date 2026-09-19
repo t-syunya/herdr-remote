@@ -1,35 +1,35 @@
-## Summary
+## 概要
 
-<!-- What changed and why? -->
+<!-- 何を、なぜ変更したかを記載してください。 -->
 
-## Scope
+## 変更範囲
 
-<!-- Which app/package is affected? -->
+<!-- 影響を受けるアプリケーション・パッケージを選択してください。 -->
 
 - [ ] `apps/web`
 - [ ] `apps/server`
 - [ ] `packages/herdr`
 - [ ] `packages/shared`
-- [ ] docs / tooling
+- [ ] ドキュメント / 開発ツール
 
-## Architecture check
+## アーキテクチャの確認
 
-- [ ] Raw Herdr API details remain inside `packages/herdr`
-- [ ] No unnecessary MVP scope expansion was introduced
-- [ ] Any new architectural decision is documented
+- [ ] Herdr の生 API の詳細を `packages/herdr` 内に閉じ込めている
+- [ ] MVP の範囲を不必要に広げていない
+- [ ] 新たなアーキテクチャ上の決定を文書化している
 
-## Verification
+## 検証
 
 - [ ] lint
-- [ ] typecheck
-- [ ] tests
-- [ ] build
-- [ ] manual verification where relevant
+- [ ] 型チェック
+- [ ] テスト
+- [ ] ビルド
+- [ ] 必要に応じた手動確認
 
-## Herdr assumptions
+## Herdr の動作に関する前提
 
-<!-- List any Herdr behavior assumed or newly verified. If uncertain, update docs/herdr-api-spike.md. -->
+<!-- 仮定している動作や新たに確認した動作を記載してください。不確かな点があれば docs/herdr-api-spike.md を更新してください。 -->
 
-## Remaining risks / follow-ups
+## 残るリスク・今後の対応
 
-<!-- Keep explicit rather than hiding uncertainty. -->
+<!-- 不確かな点を隠さず、具体的に記載してください。 -->

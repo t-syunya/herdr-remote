@@ -1,23 +1,23 @@
 # herdr-remote
 
-Mobile-first remote control UI for Herdr.
+Herdr をスマートフォンから操作するためのリモート UI です。
 
-The goal is to operate Herdr running on a Mac from an iPhone over Tailscale without relying on Termius or direct TUI interaction.
+Mac 上で動く Herdr を、Tailscale 経由で iPhone から操作できるようにします。Termius や TUI の直接操作に頼らず使えることを目指しています。
 
 ## MVP
 
-- Show Workspace / Tab / Pane / Agent lists
-- Switch the active target by tapping
-- Read Pane / Agent output
-- Send text input
-- Send common special keys such as Enter, Escape, Ctrl+C, and arrow keys
-- Show normalized Agent status
-- Access the UI from an iPhone over Tailscale
+- ワークスペース・タブ・ペイン・エージェントの一覧表示
+- タップによる操作対象の切り替え
+- ペイン・エージェントの出力の読み取り
+- テキストの入力・送信
+- Enter、Escape、Ctrl+C、矢印キーなどの特殊キーの送信
+- 正規化したエージェント状態の表示
+- Tailscale 経由での iPhone からのアクセス
 
-## Architecture
+## アーキテクチャ
 
 ```text
-iPhone / browser
+iPhone / ブラウザー
       |
       | Tailscale
       v
@@ -28,16 +28,16 @@ apps/web            React + Vite + TypeScript
 apps/server         Hono + TypeScript
       |
       v
-packages/herdr      Herdr adapter / anti-corruption layer
+packages/herdr      Herdr アダプター / 腐敗防止層
       |
-      | local socket
+      | ローカルソケット
       v
 Herdr
 ```
 
-Herdr-specific raw API types must not leak outside `packages/herdr`.
+Herdr 固有の生 API 型を `packages/herdr` の外へ公開してはいけません。
 
-## Repository structure
+## リポジトリ構成
 
 ```text
 herdr-remote/
@@ -53,21 +53,21 @@ herdr-remote/
 └── pnpm-workspace.yaml
 ```
 
-## Technical decisions
+## 技術方針
 
-- Monorepo
+- モノレポ
 - pnpm workspace
-- No Turborepo for the MVP
-- Frontend: React + Vite + TypeScript
-- Backend: Hono + TypeScript
-- Browser/server API: Hono RPC
-- Herdr integration: local Socket API behind an adapter layer
-- Remote access: Tailscale only
-- No database in the MVP
-- No persisted history in the MVP
-- Realtime updates and notifications are post-MVP unless required by implementation constraints
+- MVP では Turborepo を使用しない
+- フロントエンド: React + Vite + TypeScript
+- バックエンド: Hono + TypeScript
+- ブラウザーとサーバー間の API: Hono RPC
+- Herdr との連携: アダプター層を介したローカル Socket API
+- リモートアクセス: Tailscale のみ
+- MVP ではデータベースを導入しない
+- MVP では履歴を永続化しない
+- リアルタイム更新と通知は、実装上必要な場合を除き MVP 後に検討する
 
-See `docs/architecture.md` and `docs/implementation-plan.md` for details.
+詳しくは [アーキテクチャ](docs/architecture.md) と [実装計画](docs/implementation-plan.md) を参照してください。
 
 ## 開発
 

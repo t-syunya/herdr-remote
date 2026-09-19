@@ -1,15 +1,15 @@
 # `apps/web`
 
-React + Vite + TypeScript mobile-first UI.
+React + Vite + TypeScript によるモバイル優先の UI です。
 
-## Responsibilities
+## 責務
 
-- target selection by tap
-- output rendering
-- text input and send
-- one-tap special keys
-- normalized connection and agent status presentation
+- タップによる操作対象の選択
+- 出力の表示
+- テキストの入力・送信
+- ワンタップで使える特殊キー
+- 正規化した接続状態とエージェント状態の表示
 
-## Boundary rule
+## 境界のルール
 
-This app consumes the Hono RPC client only. It must not know Herdr socket details, raw Herdr method names, or raw Herdr payload types.
+Hono RPC クライアントのみを利用します。Herdr のソケットの詳細、生のメソッド名、生ペイロードの型を扱ってはいけません。
