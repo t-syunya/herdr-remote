@@ -4,6 +4,11 @@
 
 Do this before coding the adapter against assumptions.
 
+Status (2026-09-18): **完了**。実機 0.8.2 で socket、Pane 入出力、特殊キー、
+Agent 読み取り・実 prompt 送信・完了待ち、イベント、停止・再接続を確認済み。
+詳細、確認範囲、Phase 2 向けの提案は
+[`herdr-api-spike.md`](herdr-api-spike.md) を参照。
+
 ### Verify
 
 - installed Herdr API schema
@@ -30,6 +35,17 @@ Create `docs/herdr-api-spike.md` with:
 ## Phase 1: Monorepo bootstrap
 
 Create the actual packages/apps with pnpm workspace.
+
+Status (2026-09-19): **完了**。今回の範囲は TypeScript / React / Vite / Hono の
+開発基盤と health RPC の接続確認まで。Herdr アダプターと操作 UI は後続 Phase で実装する。
+
+役割分担: Astra が設計・レビュー、Terra が実装と修正、Luna が lint / format と
+必要な検証コマンドの実行を担当する。
+
+確認済み: pnpm install、typecheck、build、lint、format:check、git diff --check。
+ブラウザーで health RPC 接続成功と API 停止時のエラー表示を確認した。
+Astra の最終レビューで Medium 以上の問題はなかった。
+Phase 1 には自動テストスイートを追加していない。境界の回帰テストは Phase 2 以降で追加する。
 
 Target shape:
 
