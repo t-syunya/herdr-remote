@@ -240,40 +240,20 @@ Ctrl+C は raw mode で byte `03` を確認したもので、任意のプロセ�
 
 実送信 request:
 
+Unix socket の通信例は、1 行が 1 つの JSON メッセージとなる。
+
+<!-- prettier-ignore -->
 ```json
-{
-  "id": "phase0-real-prompt",
-  "method": "agent.prompt",
-  "params": {
-    "target": "phase0-check",
-    "text": "This is a transport verification. Do not use tools or modify files.\nReply with exactly: PHASE0_OK",
-    "wait": { "timeout_ms": 60000 }
-  }
-}
+{"id":"phase0-real-prompt","method":"agent.prompt","params":{"target":"phase0-check","text":"This is a transport verification. Do not use tools or modify files.\nReply with exactly: PHASE0_OK","wait":{"timeout_ms":60000}}}
 ```
 
 約 6.31 秒後の応答（表示文字列・terminal ID を置換、一部の任意フィールドを省略）:
 
+応答も同じく、1 行が 1 つの JSON メッセージとなる。
+
+<!-- prettier-ignore -->
 ```json
-{
-  "id": "phase0-real-prompt",
-  "result": {
-    "type": "agent_prompted",
-    "agent": {
-      "terminal_id": "term_example",
-      "name": "phase0-check",
-      "agent": "codex",
-      "agent_status": "idle",
-      "workspace_id": "w1",
-      "tab_id": "w1:t1",
-      "pane_id": "w1:p1",
-      "focused": true,
-      "interactive_ready": true,
-      "state_change_seq": 5,
-      "revision": 44
-    }
-  }
-}
+{"id":"phase0-real-prompt","result":{"type":"agent_prompted","agent":{"terminal_id":"term_example","name":"phase0-check","agent":"codex","agent_status":"idle","workspace_id":"w1","tab_id":"w1:t1","pane_id":"w1:p1","focused":true,"interactive_ready":true,"state_change_seq":5,"revision":44}}}
 ```
 
 送信前の `state_change_seq` は 3、完了後は 5。`agent.read` で prompt 本文とは
