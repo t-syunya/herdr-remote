@@ -99,7 +99,14 @@ export function resultItem(result: RawRecord, key: string): unknown {
 }
 
 export function expectOk(result: RawRecord): void {
-  if (result.type !== "ok") {
-    throw new InvalidHerdrResponseError("Herdr の入力応答が不正です。");
-  }
+  expectResultType(result, "ok");
+}
+
+export function expectResultType(
+  result: RawRecord,
+  expectedType: string,
+): RawRecord {
+  if (result.type !== expectedType)
+    throw new InvalidHerdrResponseError("Herdr の応答種別が不正です。");
+  return result;
 }

@@ -7,6 +7,7 @@ import { createHerdrClient } from "./client.js";
 import { AgentBlockedError, InvalidHerdrResponseError } from "./errors.js";
 import {
   expectOk,
+  expectResultType,
   mapAgent,
   mapPaneOutput,
   normalizeAgentStatus,
@@ -62,6 +63,13 @@ test("必須フィールドのない出力を拒否する", () => {
 test("入力の想定外の応答を拒否する", () => {
   assert.throws(
     () => expectOk({ type: "unexpected" }),
+    InvalidHerdrResponseError,
+  );
+});
+
+test("期待しない成功応答種別を拒否する", () => {
+  assert.throws(
+    () => expectResultType({ type: "future_workspace_list" }, "workspace_list"),
     InvalidHerdrResponseError,
   );
 });

@@ -18,6 +18,7 @@ import {
 } from "./errors.js";
 import {
   expectOk,
+  expectResultType,
   mapAgent,
   mapPane,
   mapPaneOutput,
@@ -39,22 +40,35 @@ export function createHerdrClient(
     unwrap(await transport.request(method, params));
   return {
     async listWorkspaces(): Promise<Workspace[]> {
-      return resultItems(await request("workspace.list", {}), "workspaces").map(
-        mapWorkspace,
-      );
+      return resultItems(
+        expectResultType(await request("workspace.list", {}), "workspace_list"),
+        "workspaces",
+      ).map(mapWorkspace);
     },
     async listTabs(workspaceId: string): Promise<Tab[]> {
       return resultItems(
-        await request("tab.list", { workspace_id: workspaceId }),
+        expectResultType(
+          await request("tab.list", { workspace_id: workspaceId }),
+          "tab_list",
+        ),
         "tabs",
       ).map(mapTab);
     },
     async listPanes(tabId: string): Promise<Pane[]> {
       const tab = mapTab(
-        resultItem(await request("tab.get", { tab_id: tabId }), "tab"),
+        resultItem(
+          expectResultType(
+            await request("tab.get", { tab_id: tabId }),
+            "tab_info",
+          ),
+          "tab",
+        ),
       );
       return resultItems(
-        await request("pane.list", { workspace_id: tab.workspaceId }),
+        expectResultType(
+          await request("pane.list", { workspace_id: tab.workspaceId }),
+          "pane_list",
+        ),
         "panes",
       )
         .map(mapPane)
@@ -63,13 +77,16 @@ export function createHerdrClient(
     async readPane(paneId: string): Promise<PaneOutput> {
       return mapPaneOutput(
         resultItem(
-          await request("pane.read", {
-            pane_id: paneId,
-            source: "recent_unwrapped",
-            lines: outputLines,
-            format: "text",
-            strip_ansi: true,
-          }),
+          expectResultType(
+            await request("pane.read", {
+              pane_id: paneId,
+              source: "recent_unwrapped",
+              lines: outputLines,
+              format: "text",
+              strip_ansi: true,
+            }),
+            "pane_read",
+          ),
           "read",
         ),
       );
@@ -86,25 +103,35 @@ export function createHerdrClient(
       );
     },
     async listAgents(): Promise<Agent[]> {
-      return resultItems(await request("agent.list", {}), "agents").map(
-        mapAgent,
-      );
+      return resultItems(
+        expectResultType(await request("agent.list", {}), "agent_list"),
+        "agents",
+      ).map(mapAgent);
     },
     async readAgent(agentId: string): Promise<Agent> {
       return mapAgent(
-        resultItem(await request("agent.get", { target: agentId }), "agent"),
+        resultItem(
+          expectResultType(
+            await request("agent.get", { target: agentId }),
+            "agent_info",
+          ),
+          "agent",
+        ),
       );
     },
     async readAgentOutput(agentId: string): Promise<PaneOutput> {
       return mapPaneOutput(
         resultItem(
-          await request("agent.read", {
-            target: agentId,
-            source: "recent_unwrapped",
-            lines: outputLines,
-            format: "text",
-            strip_ansi: true,
-          }),
+          expectResultType(
+            await request("agent.read", {
+              target: agentId,
+              source: "recent_unwrapped",
+              lines: outputLines,
+              format: "text",
+              strip_ansi: true,
+            }),
+            "pane_read",
+          ),
           "read",
         ),
       );
@@ -112,7 +139,10 @@ export function createHerdrClient(
     async sendPrompt(agentId: string, prompt: string): Promise<Agent> {
       return mapAgent(
         resultItem(
-          await request("agent.prompt", { target: agentId, text: prompt }),
+          expectResultType(
+            await request("agent.prompt", { target: agentId, text: prompt }),
+            "agent_prompted",
+          ),
           "agent",
         ),
       );
