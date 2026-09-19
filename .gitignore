@@ -2,6 +2,8 @@ node_modules/
 .pnpm-store/
 dist/
 coverage/
+.vite/
+.tsbuildinfo
 .env
 .env.*
 !.env.example

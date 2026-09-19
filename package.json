@@ -1,11 +1,24 @@
 {
   "name": "herdr-remote",
   "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.24.0",
   "scripts": {
     "build": "pnpm -r --if-present build",
     "dev": "pnpm -r --parallel --if-present dev",
-    "lint": "pnpm -r --if-present lint",
+    "format": "prettier --write --ignore-unknown .prettierignore .gitignore package.json pnpm-workspace.yaml tsconfig.base.json eslint.config.js prettier.config.js README.md apps packages",
+    "format:check": "prettier --check --ignore-unknown .prettierignore .gitignore package.json pnpm-workspace.yaml tsconfig.base.json eslint.config.js prettier.config.js README.md apps packages",
+    "lint": "eslint . && pnpm -r --if-present lint",
     "test": "pnpm -r --if-present test",
     "typecheck": "pnpm -r --if-present typecheck"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "eslint": "^9.39.1",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^16.5.0",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.0"
   }
 }
