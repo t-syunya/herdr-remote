@@ -9,11 +9,15 @@ import type {
   Workspace,
 } from "./domain.js";
 import {
+  AgentBlockedError,
+  AgentNotReadyError,
   HerdrOperationError,
+  HerdrTimeoutError,
   TargetNotFoundError,
   UnsupportedOperationError,
 } from "./errors.js";
 import {
+  expectOk,
   mapAgent,
   mapPane,
   mapPaneOutput,
@@ -71,13 +75,15 @@ export function createHerdrClient(
       );
     },
     async sendText(paneId: string, text: string): Promise<void> {
-      await request("pane.send_text", { pane_id: paneId, text });
+      expectOk(await request("pane.send_text", { pane_id: paneId, text }));
     },
     async sendKey(paneId: string, key: SpecialKey): Promise<void> {
-      await request("pane.send_keys", {
-        pane_id: paneId,
-        keys: [specialKeyNames[key]],
-      });
+      expectOk(
+        await request("pane.send_keys", {
+          pane_id: paneId,
+          keys: [specialKeyNames[key]],
+        }),
+      );
     },
     async listAgents(): Promise<Agent[]> {
       return resultItems(await request("agent.list", {}), "agents").map(
@@ -123,5 +129,11 @@ function unwrap(response: RawResponse): Record<string, unknown> {
     throw new TargetNotFoundError(response.error.message);
   if (response.error.code === "unsupported_event_wait_match")
     throw new UnsupportedOperationError(response.error.message);
+  if (response.error.code === "agent_blocked")
+    throw new AgentBlockedError(response.error.message);
+  if (response.error.code === "agent_not_ready")
+    throw new AgentNotReadyError(response.error.message);
+  if (response.error.code === "timeout")
+    throw new HerdrTimeoutError(response.error.message);
   throw new HerdrOperationError(response.error.message, response.error.code);
 }

@@ -1,6 +1,9 @@
 export { createHerdrClient } from "./client.js";
 export {
+  AgentBlockedError,
+  AgentNotReadyError,
   HerdrOperationError,
+  HerdrTimeoutError,
   HerdrUnavailableError,
   InvalidHerdrResponseError,
   TargetNotFoundError,

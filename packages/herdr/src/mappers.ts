@@ -97,3 +97,9 @@ export function resultItem(result: RawRecord, key: string): unknown {
     throw new InvalidHerdrResponseError(`${key} がありません。`);
   return result[key];
 }
+
+export function expectOk(result: RawRecord): void {
+  if (result.type !== "ok") {
+    throw new InvalidHerdrResponseError("Herdr の入力応答が不正です。");
+  }
+}

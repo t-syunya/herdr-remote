@@ -32,7 +32,7 @@ export class SocketTransport {
     const request: RawRequest = { id: randomUUID(), method, params };
     return new Promise((resolve, reject) => {
       const socket = connect(this.socketPath);
-      let received = "";
+      const chunks: Buffer[] = [];
       let receivedBytes = 0;
       let settled = false;
       const finish = (callback: () => void) => {
@@ -56,7 +56,7 @@ export class SocketTransport {
           );
           return;
         }
-        received += chunk.toString("utf8");
+        chunks.push(chunk);
       });
       socket.on("timeout", () =>
         finish(() =>
@@ -86,7 +86,7 @@ export class SocketTransport {
       );
       socket.on("end", () =>
         finish(() => {
-          if (!received) {
+          if (receivedBytes === 0) {
             reject(
               new TransportDisconnectedError(
                 "Herdr から応答される前に接続が切断されました。",
@@ -95,7 +95,7 @@ export class SocketTransport {
             return;
           }
           try {
-            resolve(parseResponse(received));
+            resolve(parseResponse(Buffer.concat(chunks).toString("utf8")));
           } catch (error) {
             reject(error);
           }
