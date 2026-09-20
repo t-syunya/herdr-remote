@@ -14,6 +14,7 @@ export {
 export type {
   Agent,
   AgentStatus,
+  AgentTarget,
   HerdrClient,
   HerdrClientOptions,
   Pane,

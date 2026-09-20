@@ -1,5 +1,6 @@
 import type {
   Agent,
+  AgentTarget,
   HerdrClient,
   HerdrClientOptions,
   Pane,
@@ -108,23 +109,23 @@ export function createHerdrClient(
         "agents",
       ).map(mapAgent);
     },
-    async readAgent(agentId: string): Promise<Agent> {
+    async readAgent(target: AgentTarget): Promise<Agent> {
       return mapAgent(
         resultItem(
           expectResultType(
-            await request("agent.get", { target: agentId }),
+            await request("agent.get", { target: agentTarget(target) }),
             "agent_info",
           ),
           "agent",
         ),
       );
     },
-    async readAgentOutput(agentId: string): Promise<PaneOutput> {
+    async readAgentOutput(target: AgentTarget): Promise<PaneOutput> {
       return mapPaneOutput(
         resultItem(
           expectResultType(
             await request("agent.read", {
-              target: agentId,
+              target: agentTarget(target),
               source: "recent_unwrapped",
               lines: outputLines,
               format: "text",
@@ -136,11 +137,14 @@ export function createHerdrClient(
         ),
       );
     },
-    async sendPrompt(agentId: string, prompt: string): Promise<Agent> {
+    async sendPrompt(target: AgentTarget, prompt: string): Promise<Agent> {
       return mapAgent(
         resultItem(
           expectResultType(
-            await request("agent.prompt", { target: agentId, text: prompt }),
+            await request("agent.prompt", {
+              target: agentTarget(target),
+              text: prompt,
+            }),
             "agent_prompted",
           ),
           "agent",
@@ -148,6 +152,10 @@ export function createHerdrClient(
       );
     },
   };
+}
+
+function agentTarget(target: AgentTarget): string {
+  return "paneId" in target ? target.paneId : target.name;
 }
 
 function unwrap(response: RawResponse): Record<string, unknown> {

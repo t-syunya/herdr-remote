@@ -24,6 +24,9 @@ Herdr の生ペイロードの型を `apps/server`、`apps/web`、`packages/shar
 `createHerdrClient()` が安定した `HerdrClient` を返す。主な操作は、ワークスペース・タブ・
 ペイン・Agent の一覧と読取、テキスト・特殊キー・Agent prompt の送信である。
 
+Agent は永続 ID を持たないため、`Agent` の `paneId` は現在の操作位置を示す値である。
+Agent 操作には `AgentTarget` を渡し、`{ paneId }` または `{ name }` を明示する。
+
 接続先はアダプター内部で設定する。既定では `$HOME/.config/herdr/herdr.sock` を使用し、
 必要に応じてサーバー環境の `HERDR_SOCKET_PATH` で上書きできる。
 

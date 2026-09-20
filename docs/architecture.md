@@ -108,10 +108,14 @@ interface HerdrClient {
   sendText(paneId: string, text: string): Promise<void>;
   sendKey(paneId: string, key: SpecialKey): Promise<void>;
   listAgents(): Promise<Agent[]>;
-  readAgent(agentId: string): Promise<Agent>;
-  sendPrompt(agentId: string, prompt: string): Promise<void>;
+  readAgent(target: AgentTarget): Promise<Agent>;
+  readAgentOutput(target: AgentTarget): Promise<PaneOutput>;
+  sendPrompt(target: AgentTarget, prompt: string): Promise<Agent>;
 }
 ```
+
+`AgentTarget` は `{ paneId: string } | { name: string }` とする。Agent に永続 ID はなく、
+Pane ID は現在の操作位置を示す値としてのみ扱う。
 
 これらは設計上の目標であり、Herdr の生 API に関する主張ではない。
 

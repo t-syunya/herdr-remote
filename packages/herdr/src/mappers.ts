@@ -67,7 +67,6 @@ export function mapAgent(value: unknown): Agent {
   const raw = record(value, "agent");
   const paneId = string(raw.pane_id, "pane_id");
   return {
-    id: paneId,
     paneId,
     workspaceId: string(raw.workspace_id, "workspace_id"),
     tabId: string(raw.tab_id, "tab_id"),

@@ -30,7 +30,6 @@ export type PaneOutput = {
   truncated: boolean;
 };
 export type Agent = {
-  id: string;
   paneId: string;
   workspaceId: string;
   tabId: string;
@@ -39,6 +38,7 @@ export type Agent = {
   interactiveReady?: boolean;
   status: AgentStatus;
 };
+export type AgentTarget = { paneId: string } | { name: string };
 
 export type SpecialKey =
   | "enter"
@@ -60,7 +60,7 @@ export interface HerdrClient {
   sendText(paneId: string, text: string): Promise<void>;
   sendKey(paneId: string, key: SpecialKey): Promise<void>;
   listAgents(): Promise<Agent[]>;
-  readAgent(agentId: string): Promise<Agent>;
-  readAgentOutput(agentId: string): Promise<PaneOutput>;
-  sendPrompt(agentId: string, prompt: string): Promise<Agent>;
+  readAgent(target: AgentTarget): Promise<Agent>;
+  readAgentOutput(target: AgentTarget): Promise<PaneOutput>;
+  sendPrompt(target: AgentTarget, prompt: string): Promise<Agent>;
 }

@@ -40,13 +40,17 @@ async function withSocketPath<T>(
   }
 }
 
-function requestId(chunk: Buffer): string {
+function requestPayload(chunk: Buffer): {
+  id: string;
+  params: Record<string, unknown>;
+} {
   const request: unknown = JSON.parse(chunk.toString("utf8"));
   assert.equal(typeof request, "object");
   assert.notEqual(request, null);
   assert.equal(Array.isArray(request), false);
   assert.equal(typeof (request as { id?: unknown }).id, "string");
-  return (request as { id: string }).id;
+  assert.equal(typeof (request as { params?: unknown }).params, "object");
+  return request as { id: string; params: Record<string, unknown> };
 }
 
 test("未知の Agent 状態は unknown に正規化する", () => {
@@ -77,7 +81,6 @@ test("Agent の optional フィールドを安定モデルへ変換する", () =
       interactive_ready: true,
     }),
     {
-      id: "w1:p1",
       paneId: "w1:p1",
       workspaceId: "w1",
       tabId: "w1:t1",
@@ -186,7 +189,7 @@ test("分割された UTF-8 応答を壊さずに読み取る", async () => {
     socket.once("data", (chunk: Buffer) => {
       const response = Buffer.from(
         `${JSON.stringify({
-          id: requestId(chunk),
+          id: requestPayload(chunk).id,
           result: {
             type: "workspace_list",
             workspaces: [
@@ -225,21 +228,23 @@ test("既知の Agent prompt 拒否を安定エラーへ変換する", async () 
   const directory = await mkdtemp(`${tmpdir()}/herdr-adapter-test-`);
   const socketPath = `${directory}/herdr.sock`;
   const server = createServer((socket) => {
-    socket.once("data", (chunk: Buffer) =>
+    socket.once("data", (chunk: Buffer) => {
+      const request = requestPayload(chunk);
+      assert.equal(request.params.target, "w1:p1");
       socket.end(
         `${JSON.stringify({
-          id: requestId(chunk),
+          id: request.id,
           error: { code: "agent_blocked", message: "agent is blocked" },
         })}\n`,
-      ),
-    );
+      );
+    });
   });
   await new Promise<void>((resolve) => server.listen(socketPath, resolve));
 
   try {
     await withSocketPath(socketPath, async () =>
       assert.rejects(
-        createHerdrClient().sendPrompt("w1:p1", "continue"),
+        createHerdrClient().sendPrompt({ paneId: "w1:p1" }, "continue"),
         AgentBlockedError,
       ),
     );
@@ -258,7 +263,7 @@ test("未知の Herdr エラーコードを公開しない", async () => {
     socket.once("data", (chunk: Buffer) =>
       socket.end(
         `${JSON.stringify({
-          id: requestId(chunk),
+          id: requestPayload(chunk).id,
           error: { code: "future_error", message: "operation failed" },
         })}\n`,
       ),
@@ -274,6 +279,47 @@ test("未知の Herdr エラーコードを公開しない", async () => {
         return true;
       }),
     );
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("Agent 名を明示した操作対象を Herdr に送る", async () => {
+  const directory = await mkdtemp(`${tmpdir()}/herdr-adapter-test-`);
+  const socketPath = `${directory}/herdr.sock`;
+  const server = createServer((socket) => {
+    socket.once("data", (chunk: Buffer) => {
+      const request = requestPayload(chunk);
+      assert.deepEqual(request.params, { target: "worker", text: "continue" });
+      socket.end(
+        `${JSON.stringify({
+          id: request.id,
+          result: {
+            type: "agent_prompted",
+            agent: {
+              pane_id: "w1:p1",
+              workspace_id: "w1",
+              tab_id: "w1:t1",
+              name: "worker",
+              agent_status: "idle",
+            },
+          },
+        })}\n`,
+      );
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+  try {
+    const agent = await withSocketPath(socketPath, () =>
+      createHerdrClient().sendPrompt({ name: "worker" }, "continue"),
+    );
+    assert.equal(agent.paneId, "w1:p1");
+    assert.equal(agent.name, "worker");
+    assert.equal("id" in agent, false);
   } finally {
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),
