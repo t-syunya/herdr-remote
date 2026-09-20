@@ -12,11 +12,4 @@ export class UnsupportedOperationError extends HerdrError {}
 export class AgentBlockedError extends HerdrError {}
 export class AgentNotReadyError extends HerdrError {}
 export class HerdrTimeoutError extends HerdrError {}
-export class HerdrOperationError extends HerdrError {
-  constructor(
-    message: string,
-    readonly code: string,
-  ) {
-    super(message);
-  }
-}
+export class HerdrOperationError extends HerdrError {}

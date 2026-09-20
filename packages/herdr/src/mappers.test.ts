@@ -4,12 +4,18 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import test from "node:test";
 import { createHerdrClient } from "./client.js";
-import { AgentBlockedError, InvalidHerdrResponseError } from "./errors.js";
+import {
+  AgentBlockedError,
+  HerdrOperationError,
+  InvalidHerdrResponseError,
+} from "./errors.js";
 import {
   expectOk,
   expectResultType,
   mapAgent,
   mapPaneOutput,
+  mapTab,
+  mapWorkspace,
   normalizeAgentStatus,
 } from "./mappers.js";
 import { specialKeyNames } from "./raw/methods.js";
@@ -69,6 +75,28 @@ test("truncated が boolean でない出力を拒否する", () => {
         tab_id: "w1:t1",
         text: "partial",
         truncated: "false",
+      }),
+    InvalidHerdrResponseError,
+  );
+});
+
+test("必須の数値メタデータが不正な Workspace と Tab を拒否する", () => {
+  assert.throws(
+    () =>
+      mapWorkspace({
+        workspace_id: "w1",
+        tab_count: "1",
+        pane_count: 1,
+      }),
+    InvalidHerdrResponseError,
+  );
+  assert.throws(
+    () =>
+      mapTab({
+        tab_id: "w1:t1",
+        workspace_id: "w1",
+        number: 1,
+        pane_count: Number.NaN,
       }),
     InvalidHerdrResponseError,
   );
@@ -168,6 +196,38 @@ test("既知の Agent prompt 拒否を安定エラーへ変換する", async () 
     await assert.rejects(
       createHerdrClient({ socketPath }).sendPrompt("w1:p1", "continue"),
       AgentBlockedError,
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("未知の Herdr エラーコードを公開しない", async () => {
+  const directory = await mkdtemp(`${tmpdir()}/herdr-adapter-test-`);
+  const socketPath = `${directory}/herdr.sock`;
+  const server = createServer((socket) => {
+    socket.once("data", () =>
+      socket.end(
+        `${JSON.stringify({
+          id: "workspace-list",
+          error: { code: "future_error", message: "operation failed" },
+        })}\n`,
+      ),
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+  try {
+    await assert.rejects(
+      createHerdrClient({ socketPath }).listWorkspaces(),
+      (error: unknown) => {
+        assert.ok(error instanceof HerdrOperationError);
+        assert.equal("code" in error, false);
+        return true;
+      },
     );
   } finally {
     await new Promise<void>((resolve, reject) =>

@@ -165,5 +165,5 @@ function unwrap(response: RawResponse): Record<string, unknown> {
     throw new AgentNotReadyError(response.error.message);
   if (response.error.code === "timeout")
     throw new HerdrTimeoutError(response.error.message);
-  throw new HerdrOperationError(response.error.message, response.error.code);
+  throw new HerdrOperationError(response.error.message);
 }

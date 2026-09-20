@@ -18,8 +18,10 @@ function string(value: unknown, context: string): string {
     throw new InvalidHerdrResponseError(`${context} がありません。`);
   return value;
 }
-function number(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+function number(value: unknown, context: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value))
+    throw new InvalidHerdrResponseError(`${context} の形式が不正です。`);
+  return value;
 }
 export function normalizeAgentStatus(value: unknown): AgentStatus {
   return value === "idle" ||
@@ -34,8 +36,8 @@ export function mapWorkspace(value: unknown): Workspace {
   return {
     id: string(raw.workspace_id, "workspace_id"),
     label: typeof raw.label === "string" ? raw.label : "",
-    tabCount: number(raw.tab_count),
-    paneCount: number(raw.pane_count),
+    tabCount: number(raw.tab_count, "tab_count"),
+    paneCount: number(raw.pane_count, "pane_count"),
     status: normalizeAgentStatus(raw.agent_status),
   };
 }
@@ -45,8 +47,8 @@ export function mapTab(value: unknown): Tab {
     id: string(raw.tab_id, "tab_id"),
     workspaceId: string(raw.workspace_id, "workspace_id"),
     label: typeof raw.label === "string" ? raw.label : "",
-    position: number(raw.number),
-    paneCount: number(raw.pane_count),
+    position: number(raw.number, "number"),
+    paneCount: number(raw.pane_count, "pane_count"),
     status: normalizeAgentStatus(raw.agent_status),
   };
 }
