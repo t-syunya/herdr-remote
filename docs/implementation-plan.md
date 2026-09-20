@@ -71,6 +71,12 @@ packages/
 
 MVP に必要な操作だけを公開する。
 
+状況（2026-09-20）: **完了**。navigation、pane、agent、input、health/status の Hono RPC を
+実装した。Server は `@herdr/herdr` の安定した `HerdrClient` のみを参照し、入力検証と
+adapter error のアプリケーション向け HTTP エラーへの変換を行う。raw Herdr のメソッド名・
+型・socket 詳細は server の契約に含めていない。RPC の正常系、入力検証、Agent target の
+排他指定、可用性エラー変換を server の境界テストで確認する。
+
 想定するグループ:
 
 - セッション・ナビゲーション状態
