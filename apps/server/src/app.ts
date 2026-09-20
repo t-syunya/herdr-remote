@@ -32,75 +32,67 @@ type ApiError = {
 };
 
 export function createApp(client: HerdrClient = createHerdrClient()) {
-  const app = new Hono();
-
-  app.onError((error, context) => {
-    const { status, code, message } = apiError(error);
-    return context.json<ApiError>({ error: { code, message } }, status);
-  });
-
-  app.get("/api/health", (context) => context.json({ status: "ok" as const }));
-
-  app.get("/api/status", async (context) => {
-    await client.listWorkspaces();
-    return context.json({ status: "available" as const });
-  });
-
-  app.get("/api/workspaces", async (context) =>
-    context.json({ workspaces: await client.listWorkspaces() }),
-  );
-  app.get("/api/workspaces/:workspaceId/tabs", async (context) =>
-    context.json({
-      tabs: await client.listTabs(requiredParam(context, "workspaceId")),
-    }),
-  );
-  app.get("/api/tabs/:tabId/panes", async (context) =>
-    context.json({
-      panes: await client.listPanes(requiredParam(context, "tabId")),
-    }),
-  );
-
-  app.get("/api/panes/:paneId/output", async (context) =>
-    context.json({
-      output: await client.readPane(requiredParam(context, "paneId")),
-    }),
-  );
-  app.post("/api/panes/:paneId/text", async (context) => {
-    const body = await jsonBody(context);
-    const text = requiredString(body.text, "text");
-    await client.sendText(requiredParam(context, "paneId"), text);
-    return context.json({ status: "sent" as const });
-  });
-  app.post("/api/panes/:paneId/key", async (context) => {
-    const body = await jsonBody(context);
-    const key = requiredSpecialKey(body.key);
-    await client.sendKey(requiredParam(context, "paneId"), key);
-    return context.json({ status: "sent" as const });
-  });
-
-  app.get("/api/agents", async (context) =>
-    context.json({ agents: await client.listAgents() }),
-  );
-  app.get("/api/agents/target", async (context) =>
-    context.json({
-      agent: await client.readAgent(agentTarget(context.req.query())),
-    }),
-  );
-  app.get("/api/agents/output", async (context) =>
-    context.json({
-      output: await client.readAgentOutput(agentTarget(context.req.query())),
-    }),
-  );
-  app.post("/api/agents/prompt", async (context) => {
-    const body = await jsonBody(context);
-    await client.sendPrompt(
-      agentTarget(body),
-      requiredString(body.prompt, "prompt"),
-    );
-    return context.json({ status: "sent" as const });
-  });
-
-  return app;
+  return new Hono()
+    .onError((error, context) => {
+      const { status, code, message } = apiError(error);
+      return context.json<ApiError>({ error: { code, message } }, status);
+    })
+    .get("/api/health", (context) => context.json({ status: "ok" as const }))
+    .get("/api/status", async (context) => {
+      await client.listWorkspaces();
+      return context.json({ status: "available" as const });
+    })
+    .get("/api/workspaces", async (context) =>
+      context.json({ workspaces: await client.listWorkspaces() }),
+    )
+    .get("/api/workspaces/:workspaceId/tabs", async (context) =>
+      context.json({
+        tabs: await client.listTabs(requiredParam(context, "workspaceId")),
+      }),
+    )
+    .get("/api/tabs/:tabId/panes", async (context) =>
+      context.json({
+        panes: await client.listPanes(requiredParam(context, "tabId")),
+      }),
+    )
+    .get("/api/panes/:paneId/output", async (context) =>
+      context.json({
+        output: await client.readPane(requiredParam(context, "paneId")),
+      }),
+    )
+    .post("/api/panes/:paneId/text", async (context) => {
+      const body = await jsonBody(context);
+      const text = requiredString(body.text, "text");
+      await client.sendText(requiredParam(context, "paneId"), text);
+      return context.json({ status: "sent" as const });
+    })
+    .post("/api/panes/:paneId/key", async (context) => {
+      const body = await jsonBody(context);
+      const key = requiredSpecialKey(body.key);
+      await client.sendKey(requiredParam(context, "paneId"), key);
+      return context.json({ status: "sent" as const });
+    })
+    .get("/api/agents", async (context) =>
+      context.json({ agents: await client.listAgents() }),
+    )
+    .get("/api/agents/target", async (context) =>
+      context.json({
+        agent: await client.readAgent(agentTarget(context.req.query())),
+      }),
+    )
+    .get("/api/agents/output", async (context) =>
+      context.json({
+        output: await client.readAgentOutput(agentTarget(context.req.query())),
+      }),
+    )
+    .post("/api/agents/prompt", async (context) => {
+      const body = await jsonBody(context);
+      await client.sendPrompt(
+        agentTarget(body),
+        requiredString(body.prompt, "prompt"),
+      );
+      return context.json({ status: "sent" as const });
+    });
 }
 
 export const app = createApp();
