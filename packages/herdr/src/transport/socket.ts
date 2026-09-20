@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import { connect } from "node:net";
 import { randomUUID } from "node:crypto";
 import {
+  HerdrAccessDeniedError,
   HerdrUnavailableError,
   InvalidHerdrResponseError,
   TransportDisconnectedError,
@@ -80,21 +81,7 @@ export class SocketTransport {
         ),
       );
       socket.on("error", (error: NodeJS.ErrnoException) =>
-        finish(() => {
-          if (error.code === "ENOENT" || error.code === "ECONNREFUSED")
-            reject(
-              new HerdrUnavailableError("Herdr に接続できません。", {
-                cause: error,
-              }),
-            );
-          else
-            reject(
-              new TransportDisconnectedError(
-                "Herdr との接続が切断されました。",
-                { cause: error },
-              ),
-            );
-        }),
+        finish(() => reject(mapSocketConnectionError(error))),
       );
       socket.on("end", () =>
         finish(() => {
@@ -107,7 +94,9 @@ export class SocketTransport {
             return;
           }
           try {
-            resolve(parseResponse(Buffer.concat(chunks).toString("utf8")));
+            resolve(
+              parseResponse(Buffer.concat(chunks).toString("utf8"), request.id),
+            );
           } catch (error) {
             reject(error);
           }
@@ -117,7 +106,7 @@ export class SocketTransport {
   }
 }
 
-function parseResponse(payload: string): RawResponse {
+function parseResponse(payload: string, requestId: string): RawResponse {
   const lines = payload.trim().split("\n");
   if (lines.length !== 1 || !lines[0])
     throw new InvalidHerdrResponseError("Herdr の応答が不正です。");
@@ -126,13 +115,15 @@ function parseResponse(payload: string): RawResponse {
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
       throw new Error("not an object");
     const response = parsed as Record<string, unknown>;
+    if (response.id !== requestId)
+      throw new InvalidHerdrResponseError("Herdr の応答 ID が不正です。");
     if (
       typeof response.result === "object" &&
       response.result !== null &&
       !Array.isArray(response.result)
     )
       return {
-        ...(typeof response.id === "string" ? { id: response.id } : {}),
+        id: response.id,
         result: response.result as Record<string, unknown>,
       };
     if (
@@ -143,7 +134,7 @@ function parseResponse(payload: string): RawResponse {
       const error = response.error as Record<string, unknown>;
       if (typeof error.code === "string" && typeof error.message === "string")
         return {
-          ...(typeof response.id === "string" ? { id: response.id } : {}),
+          id: response.id,
           error: { code: error.code, message: error.message },
         };
     }
@@ -151,4 +142,21 @@ function parseResponse(payload: string): RawResponse {
     throw new InvalidHerdrResponseError("Herdr の応答を解析できません。");
   }
   throw new InvalidHerdrResponseError("Herdr の応答形式が不正です。");
+}
+
+export function mapSocketConnectionError(error: NodeJS.ErrnoException): Error {
+  if (error.code === "ENOENT" || error.code === "ECONNREFUSED")
+    return new HerdrUnavailableError("Herdr に接続できません。", {
+      cause: error,
+    });
+  if (error.code === "EACCES" || error.code === "EPERM")
+    return new HerdrAccessDeniedError(
+      "Herdr のソケットへアクセスできません。",
+      {
+        cause: error,
+      },
+    );
+  return new TransportDisconnectedError("Herdr との接続が切断されました。", {
+    cause: error,
+  });
 }

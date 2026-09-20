@@ -6,6 +6,7 @@ import test from "node:test";
 import { createHerdrClient } from "./client.js";
 import {
   AgentBlockedError,
+  HerdrAccessDeniedError,
   HerdrOperationError,
   InvalidHerdrResponseError,
   TransportDisconnectedError,
@@ -20,7 +21,10 @@ import {
   normalizeAgentStatus,
 } from "./mappers.js";
 import { specialKeyNames } from "./raw/methods.js";
-import { SocketTransport } from "./transport/socket.js";
+import {
+  mapSocketConnectionError,
+  SocketTransport,
+} from "./transport/socket.js";
 
 async function withSocketPath<T>(
   socketPath: string,
@@ -34,6 +38,15 @@ async function withSocketPath<T>(
     if (previous === undefined) delete process.env.HERDR_SOCKET_PATH;
     else process.env.HERDR_SOCKET_PATH = previous;
   }
+}
+
+function requestId(chunk: Buffer): string {
+  const request: unknown = JSON.parse(chunk.toString("utf8"));
+  assert.equal(typeof request, "object");
+  assert.notEqual(request, null);
+  assert.equal(Array.isArray(request), false);
+  assert.equal(typeof (request as { id?: unknown }).id, "string");
+  return (request as { id: string }).id;
 }
 
 test("未知の Agent 状態は unknown に正規化する", () => {
@@ -132,6 +145,17 @@ test("期待しない成功応答種別を拒否する", () => {
   );
 });
 
+test("ソケットの権限エラーを安定エラーへ変換する", () => {
+  assert.ok(
+    mapSocketConnectionError({ code: "EACCES" }) instanceof
+      HerdrAccessDeniedError,
+  );
+  assert.ok(
+    mapSocketConnectionError({ code: "EPERM" }) instanceof
+      HerdrAccessDeniedError,
+  );
+});
+
 test("壊れたソケット応答をアダプター境界で拒否する", async () => {
   const directory = await mkdtemp(`${tmpdir()}/herdr-adapter-test-`);
   const socketPath = `${directory}/herdr.sock`;
@@ -158,26 +182,26 @@ test("壊れたソケット応答をアダプター境界で拒否する", async
 test("分割された UTF-8 応答を壊さずに読み取る", async () => {
   const directory = await mkdtemp(`${tmpdir()}/herdr-adapter-test-`);
   const socketPath = `${directory}/herdr.sock`;
-  const response = Buffer.from(
-    `${JSON.stringify({
-      id: "workspace-list",
-      result: {
-        type: "workspace_list",
-        workspaces: [
-          {
-            workspace_id: "w1",
-            label: "日本語",
-            tab_count: 1,
-            pane_count: 1,
-            agent_status: "idle",
-          },
-        ],
-      },
-    })}\n`,
-  );
-  const splitAt = response.indexOf(Buffer.from("日")) + 1;
   const server = createServer((socket) => {
-    socket.once("data", () => {
+    socket.once("data", (chunk: Buffer) => {
+      const response = Buffer.from(
+        `${JSON.stringify({
+          id: requestId(chunk),
+          result: {
+            type: "workspace_list",
+            workspaces: [
+              {
+                workspace_id: "w1",
+                label: "日本語",
+                tab_count: 1,
+                pane_count: 1,
+                agent_status: "idle",
+              },
+            ],
+          },
+        })}\n`,
+      );
+      const splitAt = response.indexOf(Buffer.from("日")) + 1;
       socket.write(response.subarray(0, splitAt));
       setTimeout(() => socket.end(response.subarray(splitAt)), 0);
     });
@@ -201,10 +225,10 @@ test("既知の Agent prompt 拒否を安定エラーへ変換する", async () 
   const directory = await mkdtemp(`${tmpdir()}/herdr-adapter-test-`);
   const socketPath = `${directory}/herdr.sock`;
   const server = createServer((socket) => {
-    socket.once("data", () =>
+    socket.once("data", (chunk: Buffer) =>
       socket.end(
         `${JSON.stringify({
-          id: "agent-prompt",
+          id: requestId(chunk),
           error: { code: "agent_blocked", message: "agent is blocked" },
         })}\n`,
       ),
@@ -231,10 +255,10 @@ test("未知の Herdr エラーコードを公開しない", async () => {
   const directory = await mkdtemp(`${tmpdir()}/herdr-adapter-test-`);
   const socketPath = `${directory}/herdr.sock`;
   const server = createServer((socket) => {
-    socket.once("data", () =>
+    socket.once("data", (chunk: Buffer) =>
       socket.end(
         `${JSON.stringify({
-          id: "workspace-list",
+          id: requestId(chunk),
           error: { code: "future_error", message: "operation failed" },
         })}\n`,
       ),
@@ -249,6 +273,41 @@ test("未知の Herdr エラーコードを公開しない", async () => {
         assert.equal("code" in error, false);
         return true;
       }),
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("ID がない、または不一致のソケット応答を拒否する", async () => {
+  const directory = await mkdtemp(`${tmpdir()}/herdr-adapter-test-`);
+  const socketPath = `${directory}/herdr.sock`;
+  const responses = [
+    { result: { type: "workspace_list", workspaces: [] } },
+    {
+      id: "another-request",
+      result: { type: "workspace_list", workspaces: [] },
+    },
+  ];
+  const server = createServer((socket) => {
+    socket.once("data", () =>
+      socket.end(`${JSON.stringify(responses.shift())}\n`),
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+  try {
+    const transport = new SocketTransport({ socketPath });
+    await assert.rejects(
+      transport.request("workspace.list", {}),
+      InvalidHerdrResponseError,
+    );
+    await assert.rejects(
+      transport.request("workspace.list", {}),
+      InvalidHerdrResponseError,
     );
   } finally {
     await new Promise<void>((resolve, reject) =>

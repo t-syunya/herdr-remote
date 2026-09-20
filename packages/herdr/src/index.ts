@@ -1,5 +1,6 @@
 export { createHerdrClient } from "./client.js";
 export {
+  HerdrAccessDeniedError,
   AgentBlockedError,
   AgentNotReadyError,
   HerdrOperationError,

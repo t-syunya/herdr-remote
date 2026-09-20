@@ -5,6 +5,7 @@ export class HerdrError extends Error {
   }
 }
 export class HerdrUnavailableError extends HerdrError {}
+export class HerdrAccessDeniedError extends HerdrError {}
 export class TransportDisconnectedError extends HerdrError {}
 export class InvalidHerdrResponseError extends HerdrError {}
 export class TargetNotFoundError extends HerdrError {}
