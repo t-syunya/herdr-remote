@@ -1,5 +1,25 @@
-/**
- * Herdr 固有の安定したアダプター API の公開境界。
- * Phase 2 で実機調査に基づく API を追加する。
- */
-export {};
+export { createHerdrClient } from "./client.js";
+export {
+  HerdrAccessDeniedError,
+  AgentBlockedError,
+  AgentNotReadyError,
+  HerdrOperationError,
+  HerdrTimeoutError,
+  HerdrUnavailableError,
+  InvalidHerdrResponseError,
+  TargetNotFoundError,
+  TransportDisconnectedError,
+  UnsupportedOperationError,
+} from "./errors.js";
+export type {
+  Agent,
+  AgentStatus,
+  AgentTarget,
+  HerdrClient,
+  HerdrClientOptions,
+  Pane,
+  PaneOutput,
+  SpecialKey,
+  Tab,
+  Workspace,
+} from "./domain.js";
