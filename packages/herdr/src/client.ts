@@ -34,7 +34,7 @@ import { SocketTransport } from "./transport/socket.js";
 export function createHerdrClient(
   options: HerdrClientOptions = {},
 ): HerdrClient {
-  const transport = new SocketTransport(options);
+  const transport = new SocketTransport();
   const outputLines = options.outputLines ?? 200;
   const request = async (method: string, params: Record<string, unknown>) =>
     unwrap(await transport.request(method, params));

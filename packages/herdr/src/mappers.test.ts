@@ -8,6 +8,7 @@ import {
   AgentBlockedError,
   HerdrOperationError,
   InvalidHerdrResponseError,
+  TransportDisconnectedError,
 } from "./errors.js";
 import {
   expectOk,
@@ -19,6 +20,21 @@ import {
   normalizeAgentStatus,
 } from "./mappers.js";
 import { specialKeyNames } from "./raw/methods.js";
+import { SocketTransport } from "./transport/socket.js";
+
+async function withSocketPath<T>(
+  socketPath: string,
+  callback: () => Promise<T>,
+) {
+  const previous = process.env.HERDR_SOCKET_PATH;
+  process.env.HERDR_SOCKET_PATH = socketPath;
+  try {
+    return await callback();
+  } finally {
+    if (previous === undefined) delete process.env.HERDR_SOCKET_PATH;
+    else process.env.HERDR_SOCKET_PATH = previous;
+  }
+}
 
 test("未知の Agent 状態は unknown に正規化する", () => {
   assert.equal(normalizeAgentStatus("working"), "working");
@@ -125,9 +141,11 @@ test("壊れたソケット応答をアダプター境界で拒否する", async
   await new Promise<void>((resolve) => server.listen(socketPath, resolve));
 
   try {
-    await assert.rejects(
-      createHerdrClient({ socketPath }).listWorkspaces(),
-      InvalidHerdrResponseError,
+    await withSocketPath(socketPath, async () =>
+      assert.rejects(
+        createHerdrClient().listWorkspaces(),
+        InvalidHerdrResponseError,
+      ),
     );
   } finally {
     await new Promise<void>((resolve, reject) =>
@@ -167,7 +185,9 @@ test("分割された UTF-8 応答を壊さずに読み取る", async () => {
   await new Promise<void>((resolve) => server.listen(socketPath, resolve));
 
   try {
-    const workspaces = await createHerdrClient({ socketPath }).listWorkspaces();
+    const workspaces = await withSocketPath(socketPath, () =>
+      createHerdrClient().listWorkspaces(),
+    );
     assert.equal(workspaces[0]?.label, "日本語");
   } finally {
     await new Promise<void>((resolve, reject) =>
@@ -193,9 +213,11 @@ test("既知の Agent prompt 拒否を安定エラーへ変換する", async () 
   await new Promise<void>((resolve) => server.listen(socketPath, resolve));
 
   try {
-    await assert.rejects(
-      createHerdrClient({ socketPath }).sendPrompt("w1:p1", "continue"),
-      AgentBlockedError,
+    await withSocketPath(socketPath, async () =>
+      assert.rejects(
+        createHerdrClient().sendPrompt("w1:p1", "continue"),
+        AgentBlockedError,
+      ),
     );
   } finally {
     await new Promise<void>((resolve, reject) =>
@@ -221,13 +243,44 @@ test("未知の Herdr エラーコードを公開しない", async () => {
   await new Promise<void>((resolve) => server.listen(socketPath, resolve));
 
   try {
-    await assert.rejects(
-      createHerdrClient({ socketPath }).listWorkspaces(),
-      (error: unknown) => {
+    await withSocketPath(socketPath, async () =>
+      assert.rejects(createHerdrClient().listWorkspaces(), (error: unknown) => {
         assert.ok(error instanceof HerdrOperationError);
         assert.equal("code" in error, false);
         return true;
-      },
+      }),
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("継続的な部分応答でも総合デッドラインで切断する", async () => {
+  const directory = await mkdtemp(`${tmpdir()}/herdr-adapter-test-`);
+  const socketPath = `${directory}/herdr.sock`;
+  const server = createServer((socket) => {
+    socket.once("data", () => {
+      const interval = setInterval(() => {
+        if (socket.destroyed) clearInterval(interval);
+        else socket.write(".");
+      }, 1);
+      const stop = () => clearInterval(interval);
+      socket.once("close", stop);
+      socket.once("error", stop);
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+  try {
+    await assert.rejects(
+      new SocketTransport({ socketPath, requestTimeoutMs: 30 }).request(
+        "workspace.list",
+        {},
+      ),
+      TransportDisconnectedError,
     );
   } finally {
     await new Promise<void>((resolve, reject) =>

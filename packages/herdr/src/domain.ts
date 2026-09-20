@@ -49,8 +49,6 @@ export type SpecialKey =
   | "arrowLeft"
   | "arrowRight";
 export type HerdrClientOptions = {
-  socketPath?: string;
-  requestTimeoutMs?: number;
   outputLines?: number;
 };
 

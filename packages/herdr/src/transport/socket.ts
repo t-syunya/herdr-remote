@@ -38,10 +38,22 @@ export class SocketTransport {
       const finish = (callback: () => void) => {
         if (!settled) {
           settled = true;
+          clearTimeout(deadline);
           socket.destroy();
           callback();
         }
       };
+      const deadline = setTimeout(
+        () =>
+          finish(() =>
+            reject(
+              new TransportDisconnectedError(
+                "Herdr からの応答がタイムアウトしました。",
+              ),
+            ),
+          ),
+        this.requestTimeoutMs,
+      );
       socket.setTimeout(this.requestTimeoutMs);
       socket.on("connect", () => socket.write(`${JSON.stringify(request)}\n`));
       socket.on("data", (chunk: Buffer) => {
