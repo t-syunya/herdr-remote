@@ -60,6 +60,20 @@ test("必須フィールドのない出力を拒否する", () => {
   );
 });
 
+test("truncated が boolean でない出力を拒否する", () => {
+  assert.throws(
+    () =>
+      mapPaneOutput({
+        pane_id: "w1:p1",
+        workspace_id: "w1",
+        tab_id: "w1:t1",
+        text: "partial",
+        truncated: "false",
+      }),
+    InvalidHerdrResponseError,
+  );
+});
+
 test("入力の想定外の応答を拒否する", () => {
   assert.throws(
     () => expectOk({ type: "unexpected" }),

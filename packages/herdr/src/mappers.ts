@@ -79,12 +79,14 @@ export function mapAgent(value: unknown): Agent {
 }
 export function mapPaneOutput(value: unknown): PaneOutput {
   const raw = record(value, "pane read");
+  if (typeof raw.truncated !== "boolean")
+    throw new InvalidHerdrResponseError("truncated の形式が不正です。");
   return {
     paneId: string(raw.pane_id, "pane_id"),
     workspaceId: string(raw.workspace_id, "workspace_id"),
     tabId: string(raw.tab_id, "tab_id"),
     text: string(raw.text, "text"),
-    truncated: typeof raw.truncated === "boolean" ? raw.truncated : false,
+    truncated: raw.truncated,
   };
 }
 export function resultItems(result: RawRecord, key: string): unknown[] {
