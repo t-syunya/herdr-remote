@@ -38,6 +38,9 @@ importers:
 
   apps/server:
     dependencies:
+      '@herdr/herdr':
+        specifier: workspace:*
+        version: link:../../packages/herdr
       '@hono/node-server':
         specifier: ^1.19.6
         version: 1.19.17(hono@4.13.8)
