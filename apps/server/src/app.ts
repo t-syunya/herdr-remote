@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { validator } from "hono/validator";
 import {
   AgentBlockedError,
   AgentNotReadyError,
@@ -60,18 +61,28 @@ export function createApp(client: HerdrClient = createHerdrClient()) {
         output: await client.readPane(requiredParam(context, "paneId")),
       }),
     )
-    .post("/api/panes/:paneId/text", async (context) => {
-      const body = await jsonBody(context);
-      const text = requiredString(body.text, "text");
-      await client.sendText(requiredParam(context, "paneId"), text);
-      return context.json({ status: "sent" as const });
-    })
-    .post("/api/panes/:paneId/key", async (context) => {
-      const body = await jsonBody(context);
-      const key = requiredSpecialKey(body.key);
-      await client.sendKey(requiredParam(context, "paneId"), key);
-      return context.json({ status: "sent" as const });
-    })
+    .post(
+      "/api/panes/:paneId/text",
+      validator("json", parseTextBody),
+      async (context) => {
+        await client.sendText(
+          requiredParam(context, "paneId"),
+          context.req.valid("json").text,
+        );
+        return context.json({ status: "sent" as const });
+      },
+    )
+    .post(
+      "/api/panes/:paneId/key",
+      validator("json", parseKeyBody),
+      async (context) => {
+        await client.sendKey(
+          requiredParam(context, "paneId"),
+          context.req.valid("json").key,
+        );
+        return context.json({ status: "sent" as const });
+      },
+    )
     .get("/api/agents", async (context) =>
       context.json({ agents: await client.listAgents() }),
     )
@@ -85,14 +96,15 @@ export function createApp(client: HerdrClient = createHerdrClient()) {
         output: await client.readAgentOutput(agentTarget(context.req.query())),
       }),
     )
-    .post("/api/agents/prompt", async (context) => {
-      const body = await jsonBody(context);
-      await client.sendPrompt(
-        agentTarget(body),
-        requiredString(body.prompt, "prompt"),
-      );
-      return context.json({ status: "sent" as const });
-    });
+    .post(
+      "/api/agents/prompt",
+      validator("json", parsePromptBody),
+      async (context) => {
+        const body = context.req.valid("json");
+        await client.sendPrompt(agentTarget(body), body.prompt);
+        return context.json({ status: "sent" as const });
+      },
+    );
 }
 
 export const app = createApp();
@@ -106,13 +118,26 @@ function requiredParam(
   return requiredString(context.req.param(name), name);
 }
 
-async function jsonBody(context: { req: { json(): Promise<unknown> } }) {
-  try {
-    const body: unknown = await context.req.json();
-    if (isRecord(body)) return body;
-  } catch {
-    // The common validation path below returns the public API error shape.
-  }
+type PromptBody = { paneId?: string; name?: string; prompt: string };
+
+function parseTextBody(value: unknown): { text: string } {
+  return { text: requiredString(jsonRecord(value).text, "text") };
+}
+
+function parseKeyBody(value: unknown): { key: SpecialKey } {
+  return { key: requiredSpecialKey(jsonRecord(value).key) };
+}
+
+function parsePromptBody(value: unknown): PromptBody {
+  const body = jsonRecord(value);
+  return {
+    ...agentTarget(body),
+    prompt: requiredString(body.prompt, "prompt"),
+  };
+}
+
+function jsonRecord(value: unknown): Record<string, unknown> {
+  if (isRecord(value)) return value;
   throw new InvalidInputError("JSON オブジェクトを指定してください。");
 }
 
