@@ -111,6 +111,13 @@ Herdr の raw API や socket 詳細は Web 側へ露出していない。
 
 Tailscale へ公開するのは web/backend サービスだけにする。Termius を使わず iPhone から MVP が動作することを確認する。
 
+状況（2026-09-21）: **完了**。`pnpm dev:tailscale` を追加し、Vite 開発サーバーを Mac の
+Tailscale IPv4 アドレスのみに bind するようにした。iPhone は `http://<Mac の Tailscale IP>:5173`
+で UI を開き、API は Vite の開発プロキシ経由で Mac 内の Server（`127.0.0.1:8787`）へ届く。
+Server と Herdr のローカルソケットは Tailscale 上に直接公開しておらず、Tailscale IP への
+bind 自体が tailnet 内からの到達に限定される。Mac 側で Tailscale IP 経由の Web/API/Herdr
+ステータスの疎通と、Server が Tailscale IP で待ち受けていないことを確認した。
+
 ## Phase 6: MVP の堅牢化
 
 MVP 完了を宣言する前に、次を確認する。
