@@ -77,11 +77,15 @@ export function App() {
   const [target, setTarget] = useState<Target>();
   const [output, setOutput] = useState<PaneOutput>();
   const [input, setInput] = useState("");
-  const [error, setError] = useState<string>();
+  const [navigationError, setNavigationError] = useState<string>();
+  const [outputError, setOutputError] = useState<string>();
+  const [agentsError, setAgentsError] = useState<string>();
+  const [actionError, setActionError] = useState<string>();
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const navigationRequestId = useRef(0);
   const outputRequestId = useRef(0);
+  const agentsRequestId = useRef(0);
 
   const refreshNavigation = useCallback(async () => {
     const requestId = ++navigationRequestId.current;
@@ -133,26 +137,30 @@ export function App() {
           nextPanes = ((await panesResponse.json()) as { panes: Pane[] }).panes;
         }
       }
+      const agentRequestId = ++agentsRequestId.current;
       const agentsResponse = await api.api.agents.$get();
       if (!agentsResponse.ok)
         throw new Error(
           await messageFor(agentsResponse, "Agent を取得できません。"),
         );
+      const nextAgents = (await agentsResponse.json()) as { agents: Agent[] };
       if (requestId !== navigationRequestId.current) return;
       setWorkspaces(nextWorkspaces);
       setTabs(nextTabs);
       setPanes(nextPanes);
-      setAgents(((await agentsResponse.json()) as { agents: Agent[] }).agents);
+      if (agentRequestId === agentsRequestId.current) {
+        setAgents(nextAgents.agents);
+      }
       setWorkspaceId(nextWorkspaceId);
       setTabId(
         nextTabs.some((tab) => tab.id === tabId) ? tabId : nextTabs[0]?.id,
       );
       setConnectionStatus("connected");
-      setError(undefined);
+      setNavigationError(undefined);
     } catch (cause) {
       if (requestId !== navigationRequestId.current) return;
       setConnectionStatus("unavailable");
-      setError(
+      setNavigationError(
         cause instanceof Error ? cause.message : "接続を確認できません。",
       );
     } finally {
@@ -180,14 +188,32 @@ export function App() {
       const nextOutput = (await response.json()) as { output: PaneOutput };
       if (requestId !== outputRequestId.current) return;
       setOutput(nextOutput.output);
-      setError(undefined);
+      setOutputError(undefined);
     } catch (cause) {
       if (requestId !== outputRequestId.current) return;
-      setError(
+      setOutputError(
         cause instanceof Error ? cause.message : "出力を取得できません。",
       );
     }
   }, [target]);
+
+  const refreshAgents = useCallback(async () => {
+    const requestId = ++agentsRequestId.current;
+    try {
+      const response = await api.api.agents.$get();
+      if (!response.ok)
+        throw new Error(await messageFor(response, "Agent を取得できません。"));
+      const nextAgents = (await response.json()) as { agents: Agent[] };
+      if (requestId !== agentsRequestId.current) return;
+      setAgents(nextAgents.agents);
+      setAgentsError(undefined);
+    } catch (cause) {
+      if (requestId !== agentsRequestId.current) return;
+      setAgentsError(
+        cause instanceof Error ? cause.message : "Agent を取得できません。",
+      );
+    }
+  }, []);
 
   useEffect(() => {
     void refreshNavigation();
@@ -196,9 +222,12 @@ export function App() {
     void refreshOutput();
   }, [refreshOutput]);
   useEffect(() => {
-    const interval = window.setInterval(() => void refreshOutput(), 4000);
+    const interval = window.setInterval(() => {
+      void refreshOutput();
+      void refreshAgents();
+    }, 4000);
     return () => window.clearInterval(interval);
-  }, [refreshOutput]);
+  }, [refreshAgents, refreshOutput]);
 
   async function selectWorkspace(nextWorkspaceId: string) {
     const requestId = ++navigationRequestId.current;
@@ -207,6 +236,7 @@ export function App() {
     setTabId(undefined);
     setTarget(undefined);
     setOutput(undefined);
+    setActionError(undefined);
     try {
       const response = await api.api.workspaces[":workspaceId"].tabs.$get({
         param: { workspaceId: nextWorkspaceId },
@@ -218,10 +248,10 @@ export function App() {
       setTabs(nextTabs);
       setPanes([]);
       setTabId(nextTabs[0]?.id);
-      setError(undefined);
+      setNavigationError(undefined);
     } catch (cause) {
       if (requestId !== navigationRequestId.current) return;
-      setError(
+      setNavigationError(
         cause instanceof Error ? cause.message : "タブを取得できません。",
       );
     }
@@ -233,6 +263,7 @@ export function App() {
     setTabId(nextTabId);
     setTarget(undefined);
     setOutput(undefined);
+    setActionError(undefined);
     try {
       const response = await api.api.tabs[":tabId"].panes.$get({
         param: { tabId: nextTabId },
@@ -242,10 +273,10 @@ export function App() {
       const nextPanes = (await response.json()) as { panes: Pane[] };
       if (requestId !== navigationRequestId.current) return;
       setPanes(nextPanes.panes);
-      setError(undefined);
+      setNavigationError(undefined);
     } catch (cause) {
       if (requestId !== navigationRequestId.current) return;
-      setError(
+      setNavigationError(
         cause instanceof Error ? cause.message : "ペインを取得できません。",
       );
     }
@@ -255,6 +286,7 @@ export function App() {
     ++outputRequestId.current;
     setTarget(nextTarget);
     setOutput(undefined);
+    setActionError(undefined);
   }
 
   async function sendText() {
@@ -280,10 +312,12 @@ export function App() {
       if (!response.ok)
         throw new Error(await messageFor(response, "送信できません。"));
       setInput("");
-      setError(undefined);
+      setActionError(undefined);
       void refreshOutput();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "送信できません。");
+      setActionError(
+        cause instanceof Error ? cause.message : "送信できません。",
+      );
     } finally {
       setIsSending(false);
     }
@@ -306,10 +340,10 @@ export function App() {
       );
       if (!response.ok)
         throw new Error(await messageFor(response, "キーを送信できません。"));
-      setError(undefined);
+      setActionError(undefined);
       void refreshOutput();
     } catch (cause) {
-      setError(
+      setActionError(
         cause instanceof Error ? cause.message : "キーを送信できません。",
       );
     } finally {
@@ -344,15 +378,16 @@ export function App() {
         {connectionStatus === "connected" && "Herdr に接続中"}
         {connectionStatus === "unavailable" && "Herdr に接続できません"}
       </p>
-      {error && (
+      {(actionError ?? navigationError ?? outputError ?? agentsError) && (
         <p className="error" role="alert">
-          {error}
+          {actionError ?? navigationError ?? outputError ?? agentsError}
         </p>
       )}
       <section className="selection-panel" aria-label="操作対象を選択">
         <label>
           ワークスペース
           <select
+            disabled={isSending}
             value={workspaceId ?? ""}
             onChange={(event) => void selectWorkspace(event.target.value)}
           >
@@ -370,6 +405,7 @@ export function App() {
           {tabs.map((tab) => (
             <button
               className={tab.id === tabId ? "selected" : ""}
+              disabled={isSending}
               key={tab.id}
               onClick={() => void selectTab(tab.id)}
               type="button"
@@ -387,6 +423,7 @@ export function App() {
                   : "target"
               }
               key={pane.id}
+              disabled={isSending}
               onClick={() => selectTarget({ kind: "pane", paneId: pane.id })}
               type="button"
             >
@@ -407,6 +444,7 @@ export function App() {
                   : "target"
               }
               key={agent.paneId}
+              disabled={isSending}
               onClick={() =>
                 selectTarget({ kind: "agent", paneId: agent.paneId })
               }
