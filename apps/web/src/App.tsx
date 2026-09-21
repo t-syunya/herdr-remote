@@ -104,6 +104,7 @@ export function App() {
     setTarget(undefined);
     setOutput(undefined);
     setInput("");
+    setOutputError(undefined);
     setActionError(undefined);
   }, []);
 
@@ -134,6 +135,7 @@ export function App() {
         : nextWorkspaces[0]?.id;
       let nextTabs: Tab[] = [];
       let nextPanes: Pane[] = [];
+      let nextTabId: string | undefined;
       if (nextWorkspaceId) {
         const tabsResponse = await api.api.workspaces[":workspaceId"].tabs.$get(
           { param: { workspaceId: nextWorkspaceId } },
@@ -143,7 +145,7 @@ export function App() {
             await messageFor(tabsResponse, "タブを取得できません。"),
           );
         nextTabs = ((await tabsResponse.json()) as { tabs: Tab[] }).tabs;
-        const nextTabId = nextTabs.some((tab) => tab.id === tabIdRef.current)
+        nextTabId = nextTabs.some((tab) => tab.id === tabIdRef.current)
           ? tabIdRef.current
           : nextTabs[0]?.id;
         if (nextTabId) {
@@ -188,9 +190,6 @@ export function App() {
       }
       setWorkspaceId(nextWorkspaceId);
       workspaceIdRef.current = nextWorkspaceId;
-      const nextTabId = nextTabs.some((tab) => tab.id === tabIdRef.current)
-        ? tabIdRef.current
-        : nextTabs[0]?.id;
       setTabId(nextTabId);
       tabIdRef.current = nextTabId;
       setConnectionStatus("connected");
@@ -381,6 +380,7 @@ export function App() {
     targetRef.current = nextTarget;
     setTarget(nextTarget);
     setOutput(undefined);
+    setOutputError(undefined);
     setActionError(undefined);
   }
 
@@ -393,17 +393,10 @@ export function App() {
           ? await api.api.agents.prompt.$post({
               json: { paneId: target.paneId, prompt: input },
             })
-          : await api.api.panes[":paneId"].text.$post(
-              {
-                param: { paneId: target.paneId },
-              },
-              {
-                init: {
-                  body: JSON.stringify({ text: input }),
-                  headers: { "content-type": "application/json" },
-                },
-              },
-            );
+          : await api.api.panes[":paneId"].text.$post({
+              param: { paneId: target.paneId },
+              json: { text: input },
+            });
       if (!response.ok) {
         const message = await messageFor(response, "送信できません。");
         if (response.status === 503) {
@@ -429,17 +422,10 @@ export function App() {
     if (!target) return;
     setIsSending(true);
     try {
-      const response = await api.api.panes[":paneId"].key.$post(
-        {
-          param: { paneId: target.paneId },
-        },
-        {
-          init: {
-            body: JSON.stringify({ key }),
-            headers: { "content-type": "application/json" },
-          },
-        },
-      );
+      const response = await api.api.panes[":paneId"].key.$post({
+        param: { paneId: target.paneId },
+        json: { key },
+      });
       if (!response.ok) {
         const message = await messageFor(response, "キーを送信できません。");
         if (response.status === 503) {
