@@ -47,6 +47,9 @@ type SpecialKey =
   | "arrowLeft"
   | "arrowRight";
 
+class HerdrUnavailableRequestError extends Error {}
+class TargetNotFoundRequestError extends Error {}
+
 const specialKeys: ReadonlyArray<{ key: SpecialKey; label: string }> = [
   { key: "enter", label: "Enter" },
   { key: "escape", label: "Esc" },
@@ -63,6 +66,10 @@ async function messageFor(response: Response, fallback: string) {
   } catch {
     return fallback;
   }
+}
+
+function isSameTarget(left: Target | undefined, right: Target | undefined) {
+  return left?.kind === right?.kind && left?.paneId === right?.paneId;
 }
 
 export function App() {
@@ -86,6 +93,16 @@ export function App() {
   const navigationRequestId = useRef(0);
   const outputRequestId = useRef(0);
   const agentsRequestId = useRef(0);
+  const targetRef = useRef<Target | undefined>(undefined);
+
+  const clearTarget = useCallback(() => {
+    ++outputRequestId.current;
+    targetRef.current = undefined;
+    setTarget(undefined);
+    setOutput(undefined);
+    setInput("");
+    setActionError(undefined);
+  }, []);
 
   const refreshNavigation = useCallback(async () => {
     const requestId = ++navigationRequestId.current;
@@ -148,8 +165,23 @@ export function App() {
       setWorkspaces(nextWorkspaces);
       setTabs(nextTabs);
       setPanes(nextPanes);
+      const currentTarget = targetRef.current;
       if (agentRequestId === agentsRequestId.current) {
         setAgents(nextAgents.agents);
+        if (
+          currentTarget?.kind === "agent" &&
+          !nextAgents.agents.some(
+            (agent) => agent.paneId === currentTarget.paneId,
+          )
+        ) {
+          clearTarget();
+        }
+      }
+      if (
+        currentTarget?.kind === "pane" &&
+        !nextPanes.some((pane) => pane.id === currentTarget.paneId)
+      ) {
+        clearTarget();
       }
       setWorkspaceId(nextWorkspaceId);
       setTabId(
@@ -166,14 +198,15 @@ export function App() {
     } finally {
       if (requestId === navigationRequestId.current) setIsRefreshing(false);
     }
-  }, [tabId, workspaceId]);
+  }, [clearTarget, tabId, workspaceId]);
 
   const refreshOutput = useCallback(async () => {
-    const requestId = ++outputRequestId.current;
     if (!target) {
       setOutput(undefined);
       return;
     }
+    if (!isSameTarget(target, targetRef.current)) return;
+    const requestId = ++outputRequestId.current;
     try {
       const response =
         target.kind === "agent"
@@ -184,13 +217,29 @@ export function App() {
               param: { paneId: target.paneId },
             });
       if (!response.ok)
-        throw new Error(await messageFor(response, "出力を取得できません。"));
+        throw response.status === 404
+          ? new TargetNotFoundRequestError(
+              await messageFor(response, "操作対象が見つかりません。"),
+            )
+          : response.status === 503
+            ? new HerdrUnavailableRequestError(
+                await messageFor(response, "Herdr に接続できません。"),
+              )
+            : new Error(await messageFor(response, "出力を取得できません。"));
       const nextOutput = (await response.json()) as { output: PaneOutput };
       if (requestId !== outputRequestId.current) return;
       setOutput(nextOutput.output);
       setOutputError(undefined);
+      setConnectionStatus("connected");
     } catch (cause) {
       if (requestId !== outputRequestId.current) return;
+      if (
+        cause instanceof HerdrUnavailableRequestError ||
+        cause instanceof TypeError
+      ) {
+        setConnectionStatus("unavailable");
+      }
+      if (cause instanceof TargetNotFoundRequestError) clearTarget();
       setOutputError(
         cause instanceof Error ? cause.message : "出力を取得できません。",
       );
@@ -202,18 +251,38 @@ export function App() {
     try {
       const response = await api.api.agents.$get();
       if (!response.ok)
-        throw new Error(await messageFor(response, "Agent を取得できません。"));
+        throw response.status === 503
+          ? new HerdrUnavailableRequestError(
+              await messageFor(response, "Herdr に接続できません。"),
+            )
+          : new Error(await messageFor(response, "Agent を取得できません。"));
       const nextAgents = (await response.json()) as { agents: Agent[] };
       if (requestId !== agentsRequestId.current) return;
       setAgents(nextAgents.agents);
+      const currentTarget = targetRef.current;
+      if (
+        currentTarget?.kind === "agent" &&
+        !nextAgents.agents.some(
+          (agent) => agent.paneId === currentTarget.paneId,
+        )
+      ) {
+        clearTarget();
+      }
       setAgentsError(undefined);
+      setConnectionStatus("connected");
     } catch (cause) {
       if (requestId !== agentsRequestId.current) return;
+      if (
+        cause instanceof HerdrUnavailableRequestError ||
+        cause instanceof TypeError
+      ) {
+        setConnectionStatus("unavailable");
+      }
       setAgentsError(
         cause instanceof Error ? cause.message : "Agent を取得できません。",
       );
     }
-  }, []);
+  }, [clearTarget]);
 
   useEffect(() => {
     void refreshNavigation();
@@ -231,12 +300,11 @@ export function App() {
 
   async function selectWorkspace(nextWorkspaceId: string) {
     const requestId = ++navigationRequestId.current;
-    ++outputRequestId.current;
     setWorkspaceId(nextWorkspaceId);
     setTabId(undefined);
-    setTarget(undefined);
-    setOutput(undefined);
-    setActionError(undefined);
+    clearTarget();
+    setTabs([]);
+    setPanes([]);
     try {
       const response = await api.api.workspaces[":workspaceId"].tabs.$get({
         param: { workspaceId: nextWorkspaceId },
@@ -259,11 +327,9 @@ export function App() {
 
   async function selectTab(nextTabId: string) {
     const requestId = ++navigationRequestId.current;
-    ++outputRequestId.current;
     setTabId(nextTabId);
-    setTarget(undefined);
-    setOutput(undefined);
-    setActionError(undefined);
+    clearTarget();
+    setPanes([]);
     try {
       const response = await api.api.tabs[":tabId"].panes.$get({
         param: { tabId: nextTabId },
@@ -284,6 +350,7 @@ export function App() {
 
   function selectTarget(nextTarget: Target) {
     ++outputRequestId.current;
+    targetRef.current = nextTarget;
     setTarget(nextTarget);
     setOutput(undefined);
     setActionError(undefined);
@@ -309,12 +376,19 @@ export function App() {
                 },
               },
             );
-      if (!response.ok)
-        throw new Error(await messageFor(response, "送信できません。"));
+      if (!response.ok) {
+        const message = await messageFor(response, "送信できません。");
+        if (response.status === 503) {
+          setConnectionStatus("unavailable");
+          throw new HerdrUnavailableRequestError(message);
+        }
+        throw new Error(message);
+      }
       setInput("");
       setActionError(undefined);
       void refreshOutput();
     } catch (cause) {
+      if (cause instanceof TypeError) setConnectionStatus("unavailable");
       setActionError(
         cause instanceof Error ? cause.message : "送信できません。",
       );
@@ -338,11 +412,18 @@ export function App() {
           },
         },
       );
-      if (!response.ok)
-        throw new Error(await messageFor(response, "キーを送信できません。"));
+      if (!response.ok) {
+        const message = await messageFor(response, "キーを送信できません。");
+        if (response.status === 503) {
+          setConnectionStatus("unavailable");
+          throw new HerdrUnavailableRequestError(message);
+        }
+        throw new Error(message);
+      }
       setActionError(undefined);
       void refreshOutput();
     } catch (cause) {
+      if (cause instanceof TypeError) setConnectionStatus("unavailable");
       setActionError(
         cause instanceof Error ? cause.message : "キーを送信できません。",
       );
