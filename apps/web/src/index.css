@@ -1,15 +1,233 @@
 :root {
-  color: #1f2937;
-  background: #f8fafc;
+  color: #e9edf5;
+  background: #10151e;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
 }
-
+* {
+  box-sizing: border-box;
+}
 body {
   margin: 0;
+  min-width: 320px;
 }
-
-main {
-  max-width: 36rem;
+button,
+select,
+textarea {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.app-shell {
+  display: grid;
+  gap: 1rem;
+  max-width: 42rem;
   margin: 0 auto;
-  padding: 2rem 1.25rem;
+  padding: 1rem;
+}
+.app-header,
+.section-heading,
+.target,
+.connection {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.app-header h1,
+h2,
+p {
+  margin: 0;
+}
+.app-header h1 {
+  font-size: 1.45rem;
+  letter-spacing: -0.03em;
+}
+.eyebrow {
+  color: #76d8b7;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+.refresh-button,
+.send-button {
+  border: 0;
+  border-radius: 0.6rem;
+  background: #76d8b7;
+  color: #09261e;
+  font-weight: 800;
+  padding: 0.6rem 0.8rem;
+}
+.connection {
+  border-radius: 0.5rem;
+  background: #1d2b3b;
+  color: #c5ddf6;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.88rem;
+}
+.connection::before {
+  content: "";
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: #e2a74a;
+}
+.connection--connected::before {
+  background: #64d997;
+}
+.connection--unavailable::before {
+  background: #f37c82;
+}
+.error {
+  border-left: 3px solid #f37c82;
+  color: #ffd7d9;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+}
+.selection-panel,
+.agents,
+.output-panel,
+.controls {
+  border: 1px solid #293445;
+  border-radius: 0.75rem;
+  background: #171e2a;
+  padding: 0.9rem;
+}
+label {
+  display: grid;
+  gap: 0.45rem;
+  color: #c3ccda;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+select,
+textarea {
+  width: 100%;
+  border: 1px solid #3a4960;
+  border-radius: 0.5rem;
+  background: #10151e;
+  color: inherit;
+  padding: 0.65rem;
+}
+.tab-list,
+.target-list,
+.key-grid {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  overflow-x: auto;
+}
+.tab-list button,
+.key-grid button {
+  min-height: 2.5rem;
+  border: 1px solid #3a4960;
+  border-radius: 0.5rem;
+  background: #202a38;
+  color: #e9edf5;
+  padding: 0.45rem 0.7rem;
+  white-space: nowrap;
+}
+.tab-list button.selected,
+.target.selected {
+  border-color: #76d8b7;
+  background: #1d4a40;
+}
+.target-list {
+  flex-direction: column;
+  overflow: visible;
+}
+.target {
+  width: 100%;
+  border: 1px solid #344259;
+  border-radius: 0.55rem;
+  background: #202a38;
+  color: inherit;
+  padding: 0.65rem;
+  text-align: left;
+}
+.agents h2,
+.section-heading h2 {
+  font-size: 1rem;
+}
+.output-panel {
+  min-height: 13rem;
+}
+pre {
+  max-height: 48vh;
+  overflow: auto;
+  margin: 0.75rem 0 0;
+  border-radius: 0.5rem;
+  background: #0c1119;
+  color: #d8e2ee;
+  padding: 0.8rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.empty,
+.hint {
+  color: #9eabba;
+  font-size: 0.88rem;
+}
+.hint {
+  margin-top: 0.65rem;
+}
+.controls {
+  position: sticky;
+  bottom: 0;
+  box-shadow: 0 -0.8rem 1.5rem #10151eb3;
+}
+textarea {
+  min-height: 5rem;
+  resize: vertical;
+}
+.send-button {
+  width: 100%;
+  margin-top: 0.65rem;
+}
+.key-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+}
+.key-grid button {
+  padding-inline: 0.35rem;
+}
+.status {
+  border-radius: 999px;
+  padding: 0.2rem 0.48rem;
+  font-size: 0.7rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.status--idle,
+.status--done {
+  background: #26485c;
+  color: #b9e4fa;
+}
+.status--working {
+  background: #34513c;
+  color: #d6f5a8;
+}
+.status--blocked {
+  background: #6b3e2d;
+  color: #ffd4ad;
+}
+.status--unknown {
+  background: #41495a;
+  color: #d6dbe6;
+}
+@media (min-width: 42rem) {
+  .app-shell {
+    padding: 1.5rem;
+  }
+  .key-grid {
+    grid-template-columns: repeat(7, 1fr);
+  }
 }
