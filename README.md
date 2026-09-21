@@ -97,6 +97,8 @@ pnpm dev:tailscale
 ```
 
 Web の待ち受けアドレスが Mac の Tailscale IPv4 アドレス（例: `http://100.x.y.z:5173`）に変わり、
-iPhone から同じ URL を開ける。Tailscale の IP アドレスは tailnet 内のデバイスからしか到達できないため、
+iPhone から同じ URL を開ける。事前に `tailscale` コマンドに PATH が通っている必要がある。
+環境変数 `DEV_HOST` を設定すれば、Tailscale 以外のアドレスを明示的に指定することもできる。
+Tailscale の IP アドレスは tailnet 内のデバイスからしか到達できないため、
 公開インターネットには露出しない。API リクエストは Vite のプロキシ経由で Mac 内の Server（`127.0.0.1:8787`）へ転送され、
 Server と Herdr のローカルソケットが直接外部へ公開されることはない。
