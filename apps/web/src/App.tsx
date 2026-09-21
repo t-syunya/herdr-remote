@@ -94,6 +94,9 @@ export function App() {
   const outputRequestId = useRef(0);
   const agentsRequestId = useRef(0);
   const targetRef = useRef<Target | undefined>(undefined);
+  const workspaceIdRef = useRef<string | undefined>(undefined);
+  const tabIdRef = useRef<string | undefined>(undefined);
+  const isPolling = useRef(false);
 
   const clearTarget = useCallback(() => {
     ++outputRequestId.current;
@@ -125,9 +128,9 @@ export function App() {
         (await workspacesResponse.json()) as { workspaces: Workspace[] }
       ).workspaces;
       const nextWorkspaceId = nextWorkspaces.some(
-        (workspace) => workspace.id === workspaceId,
+        (workspace) => workspace.id === workspaceIdRef.current,
       )
-        ? workspaceId
+        ? workspaceIdRef.current
         : nextWorkspaces[0]?.id;
       let nextTabs: Tab[] = [];
       let nextPanes: Pane[] = [];
@@ -140,8 +143,8 @@ export function App() {
             await messageFor(tabsResponse, "タブを取得できません。"),
           );
         nextTabs = ((await tabsResponse.json()) as { tabs: Tab[] }).tabs;
-        const nextTabId = nextTabs.some((tab) => tab.id === tabId)
-          ? tabId
+        const nextTabId = nextTabs.some((tab) => tab.id === tabIdRef.current)
+          ? tabIdRef.current
           : nextTabs[0]?.id;
         if (nextTabId) {
           const panesResponse = await api.api.tabs[":tabId"].panes.$get({
@@ -184,9 +187,12 @@ export function App() {
         clearTarget();
       }
       setWorkspaceId(nextWorkspaceId);
-      setTabId(
-        nextTabs.some((tab) => tab.id === tabId) ? tabId : nextTabs[0]?.id,
-      );
+      workspaceIdRef.current = nextWorkspaceId;
+      const nextTabId = nextTabs.some((tab) => tab.id === tabIdRef.current)
+        ? tabIdRef.current
+        : nextTabs[0]?.id;
+      setTabId(nextTabId);
+      tabIdRef.current = nextTabId;
       setConnectionStatus("connected");
       setNavigationError(undefined);
     } catch (cause) {
@@ -198,7 +204,7 @@ export function App() {
     } finally {
       if (requestId === navigationRequestId.current) setIsRefreshing(false);
     }
-  }, [clearTarget, tabId, workspaceId]);
+  }, [clearTarget]);
 
   const refreshOutput = useCallback(async () => {
     if (!target) {
@@ -292,14 +298,19 @@ export function App() {
   }, [refreshOutput]);
   useEffect(() => {
     const interval = window.setInterval(() => {
-      void refreshOutput();
-      void refreshAgents();
+      if (isPolling.current) return;
+      isPolling.current = true;
+      void Promise.all([refreshOutput(), refreshAgents()]).finally(() => {
+        isPolling.current = false;
+      });
     }, 4000);
     return () => window.clearInterval(interval);
   }, [refreshAgents, refreshOutput]);
 
   async function selectWorkspace(nextWorkspaceId: string) {
     const requestId = ++navigationRequestId.current;
+    workspaceIdRef.current = nextWorkspaceId;
+    tabIdRef.current = undefined;
     setWorkspaceId(nextWorkspaceId);
     setTabId(undefined);
     clearTarget();
@@ -312,10 +323,23 @@ export function App() {
       if (!response.ok)
         throw new Error(await messageFor(response, "タブを取得できません。"));
       const nextTabs = ((await response.json()) as { tabs: Tab[] }).tabs;
+      const nextTabId = nextTabs[0]?.id;
+      let nextPanes: Pane[] = [];
+      if (nextTabId) {
+        const panesResponse = await api.api.tabs[":tabId"].panes.$get({
+          param: { tabId: nextTabId },
+        });
+        if (!panesResponse.ok)
+          throw new Error(
+            await messageFor(panesResponse, "ペインを取得できません。"),
+          );
+        nextPanes = ((await panesResponse.json()) as { panes: Pane[] }).panes;
+      }
       if (requestId !== navigationRequestId.current) return;
       setTabs(nextTabs);
-      setPanes([]);
-      setTabId(nextTabs[0]?.id);
+      setPanes(nextPanes);
+      setTabId(nextTabId);
+      tabIdRef.current = nextTabId;
       setNavigationError(undefined);
     } catch (cause) {
       if (requestId !== navigationRequestId.current) return;
@@ -327,6 +351,7 @@ export function App() {
 
   async function selectTab(nextTabId: string) {
     const requestId = ++navigationRequestId.current;
+    tabIdRef.current = nextTabId;
     setTabId(nextTabId);
     clearTarget();
     setPanes([]);
@@ -350,6 +375,7 @@ export function App() {
 
   function selectTarget(nextTarget: Target) {
     ++outputRequestId.current;
+    if (!isSameTarget(targetRef.current, nextTarget)) setInput("");
     targetRef.current = nextTarget;
     setTarget(nextTarget);
     setOutput(undefined);
