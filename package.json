@@ -6,6 +6,7 @@
   "scripts": {
     "build": "pnpm -r --if-present build",
     "dev": "pnpm -r --parallel --if-present dev",
+    "dev:tailscale": "sh scripts/dev-tailscale.sh",
     "format": "prettier --write --ignore-unknown .prettierignore .gitignore package.json pnpm-workspace.yaml tsconfig.base.json eslint.config.js prettier.config.js README.md apps packages",
     "format:check": "prettier --check --ignore-unknown .prettierignore .gitignore package.json pnpm-workspace.yaml tsconfig.base.json eslint.config.js prettier.config.js README.md apps packages",
     "lint": "eslint . && pnpm -r --if-present lint",

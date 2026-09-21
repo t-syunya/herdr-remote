@@ -87,3 +87,16 @@ npx --yes pnpm@10.24.0 dev
 
 開発時は Web が `http://127.0.0.1:5173`、Server が `http://127.0.0.1:8787` で起動する。
 Vite の開発プロキシが `/api` を Server へ転送する。
+
+### Tailscale 経由で起動
+
+Mac で Tailscale を起動した状態で次を実行する。
+
+```sh
+pnpm dev:tailscale
+```
+
+Web の待ち受けアドレスが Mac の Tailscale IPv4 アドレス（例: `http://100.x.y.z:5173`）に変わり、
+iPhone から同じ URL を開ける。Tailscale の IP アドレスは tailnet 内のデバイスからしか到達できないため、
+公開インターネットには露出しない。API リクエストは Vite のプロキシ経由で Mac 内の Server（`127.0.0.1:8787`）へ転送され、
+Server と Herdr のローカルソケットが直接外部へ公開されることはない。
