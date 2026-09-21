@@ -309,6 +309,7 @@ export function App() {
 
   async function selectWorkspace(nextWorkspaceId: string) {
     const requestId = ++navigationRequestId.current;
+    setIsRefreshing(false);
     workspaceIdRef.current = nextWorkspaceId;
     tabIdRef.current = undefined;
     setWorkspaceId(nextWorkspaceId);
@@ -351,6 +352,7 @@ export function App() {
 
   async function selectTab(nextTabId: string) {
     const requestId = ++navigationRequestId.current;
+    setIsRefreshing(false);
     tabIdRef.current = nextTabId;
     setTabId(nextTabId);
     clearTarget();
