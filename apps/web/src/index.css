@@ -191,6 +191,10 @@ pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.output-line {
+  display: block;
+  min-height: 1.45em;
+}
 .empty,
 .hint {
   color: #9eabba;

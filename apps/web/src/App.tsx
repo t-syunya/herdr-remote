@@ -44,6 +44,12 @@ type PaneOutput = { text: string; truncated: boolean };
 type ApiFailure = { error?: { message?: string } };
 type ConnectionStatus = "checking" | "connected" | "unavailable";
 type Target = { kind: "pane" | "agent"; paneId: string };
+type OutputAnchor = {
+  line: string;
+  before: string[];
+  after: string[];
+  offset: number;
+};
 type SpecialKey =
   | "enter"
   | "escape"
@@ -69,6 +75,67 @@ function errorMessage(cause: unknown, fallback: string) {
   if (isRequestTimeout(cause))
     return "通信がタイムアウトしました。接続状態を確認してください。";
   return cause instanceof Error ? cause.message : fallback;
+}
+
+function outputLines(element: HTMLElement) {
+  return Array.from(
+    element.querySelectorAll<HTMLElement>("[data-output-line]"),
+  );
+}
+
+function captureOutputAnchor(element: HTMLElement): OutputAnchor | undefined {
+  const rows = outputLines(element);
+  const scrollTop = element.scrollTop;
+  const scrollportTop = element.getBoundingClientRect().top + element.clientTop;
+  const index = rows.findIndex((row) => {
+    const top = row.getBoundingClientRect().top - scrollportTop + scrollTop;
+    return top + row.getBoundingClientRect().height > scrollTop;
+  });
+  if (index < 0) return undefined;
+
+  const lines = rows.map((row) => row.textContent ?? "");
+  const top =
+    rows[index].getBoundingClientRect().top - scrollportTop + scrollTop;
+  return {
+    line: lines[index],
+    before: lines.slice(Math.max(0, index - 2), index),
+    after: lines.slice(index + 1, index + 3),
+    offset: scrollTop - top,
+  };
+}
+
+function findOutputAnchorIndex(lines: string[], anchor: OutputAnchor) {
+  let bestIndex = -1;
+  let bestScore = 0;
+  let tied = false;
+  for (let index = 0; index < lines.length; index += 1) {
+    if (lines[index] !== anchor.line) continue;
+    let score = 0;
+    for (let distance = 1; distance <= anchor.before.length; distance += 1) {
+      if (
+        lines[index - distance] ===
+        anchor.before[anchor.before.length - distance]
+      ) {
+        score += 1;
+      }
+    }
+    for (let distance = 1; distance <= anchor.after.length; distance += 1) {
+      if (lines[index + distance] === anchor.after[distance - 1]) score += 1;
+    }
+    if (score > bestScore) {
+      bestIndex = index;
+      bestScore = score;
+      tied = false;
+    } else if (score > 0 && score === bestScore) {
+      tied = true;
+    }
+  }
+  if (anchor.before.length === 0 && anchor.after.length === 0) {
+    return lines.filter((line) => line === anchor.line).length === 1
+      ? lines.indexOf(anchor.line)
+      : -1;
+  }
+  return bestScore > 0 && !tied ? bestIndex : -1;
 }
 
 const specialKeys: ReadonlyArray<{ key: SpecialKey; label: string }> = [
@@ -109,6 +176,7 @@ export function App() {
   const [outputError, setOutputError] = useState<string>();
   const [agentsError, setAgentsError] = useState<string>();
   const [actionError, setActionError] = useState<string>();
+  const [copyError, setCopyError] = useState<string>();
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [lastOutputAt, setLastOutputAt] = useState<number>();
@@ -122,8 +190,8 @@ export function App() {
   const tabIdRef = useRef<string | undefined>(undefined);
   const isPolling = useRef(false);
   const outputElement = useRef<HTMLPreElement>(null);
-  const outputScrollTop = useRef(0);
   const wasAtOutputEnd = useRef(true);
+  const outputAnchor = useRef<OutputAnchor | undefined>(undefined);
 
   const clearTarget = useCallback(() => {
     ++outputRequestId.current;
@@ -135,6 +203,8 @@ export function App() {
     setInput("");
     setOutputError(undefined);
     setActionError(undefined);
+    setCopyError(undefined);
+    outputAnchor.current = undefined;
   }, []);
 
   const refreshNavigation = useCallback(async () => {
@@ -299,12 +369,28 @@ export function App() {
   useLayoutEffect(() => {
     const element = outputElement.current;
     if (!element || !output) return;
-    element.scrollTop = wasAtOutputEnd.current
-      ? element.scrollHeight
-      : outputScrollTop.current;
+    if (wasAtOutputEnd.current) {
+      element.scrollTop = element.scrollHeight;
+    } else {
+      const rows = outputLines(element);
+      const lines = rows.map((row) => row.textContent ?? "");
+      const anchor = outputAnchor.current;
+      const index = anchor ? findOutputAnchorIndex(lines, anchor) : -1;
+      const row = index >= 0 ? rows[index] : undefined;
+      if (row && anchor) {
+        const scrollportTop =
+          element.getBoundingClientRect().top + element.clientTop;
+        const top =
+          row.getBoundingClientRect().top - scrollportTop + element.scrollTop;
+        element.scrollTop = top + anchor.offset;
+      } else {
+        element.scrollTop = 0;
+      }
+    }
     const atEnd =
       element.scrollHeight - element.scrollTop - element.clientHeight < 32;
     wasAtOutputEnd.current = atEnd;
+    outputAnchor.current = captureOutputAnchor(element);
     setIsAtOutputEnd(atEnd);
   }, [output]);
 
@@ -469,10 +555,12 @@ export function App() {
     setOutput(undefined);
     setLastOutputAt(undefined);
     setIsOutputStale(false);
+    outputAnchor.current = undefined;
     wasAtOutputEnd.current = true;
     setIsAtOutputEnd(true);
     setOutputError(undefined);
     setActionError(undefined);
+    setCopyError(undefined);
   }
 
   async function sendText() {
@@ -587,9 +675,9 @@ export function App() {
         temporary.remove();
         if (!copied) throw new Error("copy failed");
       }
-      setActionError(undefined);
+      setCopyError(undefined);
     } catch {
-      setActionError("コピーできませんでした。");
+      setCopyError("コピーできませんでした。");
     }
   }
 
@@ -616,9 +704,17 @@ export function App() {
         {connectionStatus === "connected" && "Herdr に接続中"}
         {connectionStatus === "unavailable" && "Herdr に接続できません"}
       </p>
-      {(actionError ?? navigationError ?? outputError ?? agentsError) && (
+      {(actionError ??
+        copyError ??
+        navigationError ??
+        outputError ??
+        agentsError) && (
         <p className="error" role="alert">
-          {actionError ?? navigationError ?? outputError ?? agentsError}
+          {actionError ??
+            copyError ??
+            navigationError ??
+            outputError ??
+            agentsError}
         </p>
       )}
       <section className="selection-panel" aria-label="操作対象を選択">
@@ -717,6 +813,7 @@ export function App() {
                   outputElement.current.scrollTop =
                     outputElement.current.scrollHeight;
                 wasAtOutputEnd.current = true;
+                outputAnchor.current = undefined;
                 setIsAtOutputEnd(true);
               }}
             >
@@ -733,17 +830,23 @@ export function App() {
             ref={outputElement}
             onScroll={(event) => {
               const element = event.currentTarget;
-              outputScrollTop.current = element.scrollTop;
               const atEnd =
                 element.scrollHeight -
                   element.scrollTop -
                   element.clientHeight <
                 32;
               wasAtOutputEnd.current = atEnd;
+              outputAnchor.current = captureOutputAnchor(element);
               setIsAtOutputEnd(atEnd);
             }}
           >
-            {output.text || "（出力はありません）"}
+            {(output.text || "（出力はありません）")
+              .split("\n")
+              .map((line, index) => (
+                <span className="output-line" data-output-line key={index}>
+                  {line}
+                </span>
+              ))}
           </pre>
         )}
         {output && lastOutputAt && (
