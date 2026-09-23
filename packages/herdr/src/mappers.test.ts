@@ -159,6 +159,40 @@ test("ソケットの権限エラーを安定エラーへ変換する", () => {
   );
 });
 
+test("一度の接続失敗後も次の操作で再接続する", async () => {
+  const directory = await mkdtemp(`${tmpdir()}/herdr-adapter-test-`);
+  const socketPath = `${directory}/herdr.sock`;
+
+  try {
+    await withSocketPath(socketPath, async () => {
+      const client = createHerdrClient();
+      await assert.rejects(client.listWorkspaces());
+
+      const server = createServer((socket) => {
+        socket.once("data", (chunk: Buffer) =>
+          socket.end(
+            `${JSON.stringify({
+              id: requestPayload(chunk).id,
+              result: { type: "workspace_list", workspaces: [] },
+            })}\n`,
+          ),
+        );
+      });
+      await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+      try {
+        assert.deepEqual(await client.listWorkspaces(), []);
+      } finally {
+        await new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve())),
+        );
+      }
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("壊れたソケット応答をアダプター境界で拒否する", async () => {
   const directory = await mkdtemp(`${tmpdir()}/herdr-adapter-test-`);
   const socketPath = `${directory}/herdr.sock`;
