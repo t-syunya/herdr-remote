@@ -61,7 +61,7 @@ type SpecialKey =
 
 class HerdrUnavailableRequestError extends Error {}
 class TargetNotFoundRequestError extends Error {}
-class RequestTimedOutError extends Error {}
+class RequestOutcomeUnknownError extends Error {}
 
 function isRequestTimeout(cause: unknown) {
   return cause instanceof DOMException && cause.name === "TimeoutError";
@@ -586,9 +586,7 @@ export function App() {
         const message = await messageFor(response, "送信できません。");
         if (response.status === 503 || response.status === 504) {
           setConnectionStatus("unavailable");
-          throw response.status === 504
-            ? new RequestTimedOutError(message)
-            : new HerdrUnavailableRequestError(message);
+          throw new RequestOutcomeUnknownError(message);
         }
         throw new Error(message);
       }
@@ -598,14 +596,15 @@ export function App() {
     } catch (cause) {
       if (
         cause instanceof HerdrUnavailableRequestError ||
-        cause instanceof RequestTimedOutError ||
+        cause instanceof RequestOutcomeUnknownError ||
         isConnectionFailure(cause)
       ) {
         setConnectionStatus("unavailable");
       }
       setActionError(
-        cause instanceof RequestTimedOutError || isConnectionFailure(cause)
-          ? "通信が切れたため、送達を確認できません。出力を確認してから再送してください。"
+        cause instanceof RequestOutcomeUnknownError ||
+          isConnectionFailure(cause)
+          ? "送信結果を確認できません。出力を確認してから再送してください。"
           : cause instanceof Error
             ? cause.message
             : "送信できません。",
@@ -630,9 +629,7 @@ export function App() {
         const message = await messageFor(response, "キーを送信できません。");
         if (response.status === 503 || response.status === 504) {
           setConnectionStatus("unavailable");
-          throw response.status === 504
-            ? new RequestTimedOutError(message)
-            : new HerdrUnavailableRequestError(message);
+          throw new RequestOutcomeUnknownError(message);
         }
         throw new Error(message);
       }
@@ -641,14 +638,15 @@ export function App() {
     } catch (cause) {
       if (
         cause instanceof HerdrUnavailableRequestError ||
-        cause instanceof RequestTimedOutError ||
+        cause instanceof RequestOutcomeUnknownError ||
         isConnectionFailure(cause)
       ) {
         setConnectionStatus("unavailable");
       }
       setActionError(
-        cause instanceof RequestTimedOutError || isConnectionFailure(cause)
-          ? "通信が切れたため、キーの送達を確認できません。出力を確認してから操作してください。"
+        cause instanceof RequestOutcomeUnknownError ||
+          isConnectionFailure(cause)
+          ? "キーの送信結果を確認できません。出力を確認してから操作してください。"
           : cause instanceof Error
             ? cause.message
             : "キーを送信できません。",
