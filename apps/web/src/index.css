@@ -154,6 +154,26 @@ textarea {
 .section-heading h2 {
   font-size: 1rem;
 }
+.output-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.output-actions button {
+  min-height: 2.25rem;
+  border: 1px solid #3a4960;
+  border-radius: 0.45rem;
+  background: #202a38;
+  color: inherit;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.78rem;
+}
+.destination {
+  margin-bottom: 0.65rem;
+  color: #c3ccda;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
 .output-panel {
   min-height: 13rem;
 }

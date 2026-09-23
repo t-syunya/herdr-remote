@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { api } from "./api";
 
@@ -90,6 +96,8 @@ export function App() {
   const [actionError, setActionError] = useState<string>();
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [lastOutputAt, setLastOutputAt] = useState<number>();
+  const [isAtOutputEnd, setIsAtOutputEnd] = useState(true);
   const navigationRequestId = useRef(0);
   const outputRequestId = useRef(0);
   const agentsRequestId = useRef(0);
@@ -97,12 +105,16 @@ export function App() {
   const workspaceIdRef = useRef<string | undefined>(undefined);
   const tabIdRef = useRef<string | undefined>(undefined);
   const isPolling = useRef(false);
+  const outputElement = useRef<HTMLPreElement>(null);
+  const outputScrollTop = useRef(0);
+  const wasAtOutputEnd = useRef(true);
 
   const clearTarget = useCallback(() => {
     ++outputRequestId.current;
     targetRef.current = undefined;
     setTarget(undefined);
     setOutput(undefined);
+    setLastOutputAt(undefined);
     setInput("");
     setOutputError(undefined);
     setActionError(undefined);
@@ -215,12 +227,18 @@ export function App() {
     try {
       const response =
         target.kind === "agent"
-          ? await api.api.agents.output.$get({
-              query: { paneId: target.paneId },
-            })
-          : await api.api.panes[":paneId"].output.$get({
-              param: { paneId: target.paneId },
-            });
+          ? await api.api.agents.output.$get(
+              {
+                query: { paneId: target.paneId },
+              },
+              { init: { signal: AbortSignal.timeout(10000) } },
+            )
+          : await api.api.panes[":paneId"].output.$get(
+              {
+                param: { paneId: target.paneId },
+              },
+              { init: { signal: AbortSignal.timeout(10000) } },
+            );
       if (!response.ok)
         throw response.status === 404
           ? new TargetNotFoundRequestError(
@@ -234,6 +252,7 @@ export function App() {
       const nextOutput = (await response.json()) as { output: PaneOutput };
       if (requestId !== outputRequestId.current) return;
       setOutput(nextOutput.output);
+      setLastOutputAt(Date.now());
       setOutputError(undefined);
       setConnectionStatus("connected");
     } catch (cause) {
@@ -250,6 +269,18 @@ export function App() {
       );
     }
   }, [target]);
+
+  useLayoutEffect(() => {
+    const element = outputElement.current;
+    if (!element || !output) return;
+    element.scrollTop = wasAtOutputEnd.current
+      ? element.scrollHeight
+      : outputScrollTop.current;
+    const atEnd =
+      element.scrollHeight - element.scrollTop - element.clientHeight < 32;
+    wasAtOutputEnd.current = atEnd;
+    setIsAtOutputEnd(atEnd);
+  }, [output]);
 
   const refreshAgents = useCallback(async () => {
     const requestId = ++agentsRequestId.current;
@@ -289,6 +320,12 @@ export function App() {
     }
   }, [clearTarget]);
 
+  const refreshAll = useCallback(() => {
+    void refreshNavigation();
+    void refreshOutput();
+    void refreshAgents();
+  }, [refreshAgents, refreshNavigation, refreshOutput]);
+
   useEffect(() => {
     void refreshNavigation();
   }, [refreshNavigation]);
@@ -305,6 +342,17 @@ export function App() {
     }, 4000);
     return () => window.clearInterval(interval);
   }, [refreshAgents, refreshOutput]);
+  useEffect(() => {
+    const refreshWhenActive = () => {
+      if (document.visibilityState === "visible") refreshAll();
+    };
+    window.addEventListener("online", refreshAll);
+    document.addEventListener("visibilitychange", refreshWhenActive);
+    return () => {
+      window.removeEventListener("online", refreshAll);
+      document.removeEventListener("visibilitychange", refreshWhenActive);
+    };
+  }, [refreshAll]);
 
   async function selectWorkspace(nextWorkspaceId: string) {
     const requestId = ++navigationRequestId.current;
@@ -380,6 +428,9 @@ export function App() {
     targetRef.current = nextTarget;
     setTarget(nextTarget);
     setOutput(undefined);
+    setLastOutputAt(undefined);
+    wasAtOutputEnd.current = true;
+    setIsAtOutputEnd(true);
     setOutputError(undefined);
     setActionError(undefined);
   }
@@ -390,13 +441,19 @@ export function App() {
     try {
       const response =
         target.kind === "agent"
-          ? await api.api.agents.prompt.$post({
-              json: { paneId: target.paneId, prompt: input },
-            })
-          : await api.api.panes[":paneId"].text.$post({
-              param: { paneId: target.paneId },
-              json: { text: input },
-            });
+          ? await api.api.agents.prompt.$post(
+              {
+                json: { paneId: target.paneId, prompt: input },
+              },
+              { init: { signal: AbortSignal.timeout(60000) } },
+            )
+          : await api.api.panes[":paneId"].text.$post(
+              {
+                param: { paneId: target.paneId },
+                json: { text: input },
+              },
+              { init: { signal: AbortSignal.timeout(15000) } },
+            );
       if (!response.ok) {
         const message = await messageFor(response, "送信できません。");
         if (response.status === 503) {
@@ -411,7 +468,12 @@ export function App() {
     } catch (cause) {
       if (cause instanceof TypeError) setConnectionStatus("unavailable");
       setActionError(
-        cause instanceof Error ? cause.message : "送信できません。",
+        cause instanceof TypeError ||
+          (cause instanceof DOMException && cause.name === "TimeoutError")
+          ? "通信が切れたため、送達を確認できません。出力を確認してから再送してください。"
+          : cause instanceof Error
+            ? cause.message
+            : "送信できません。",
       );
     } finally {
       setIsSending(false);
@@ -439,10 +501,38 @@ export function App() {
     } catch (cause) {
       if (cause instanceof TypeError) setConnectionStatus("unavailable");
       setActionError(
-        cause instanceof Error ? cause.message : "キーを送信できません。",
+        cause instanceof TypeError ||
+          (cause instanceof DOMException && cause.name === "TimeoutError")
+          ? "通信が切れたため、キーの送達を確認できません。出力を確認してから操作してください。"
+          : cause instanceof Error
+            ? cause.message
+            : "キーを送信できません。",
       );
     } finally {
       setIsSending(false);
+    }
+  }
+
+  async function copyOutput() {
+    if (!output) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(output.text);
+      } else {
+        const temporary = document.createElement("textarea");
+        temporary.value = output.text;
+        temporary.setAttribute("readonly", "");
+        temporary.style.position = "fixed";
+        temporary.style.opacity = "0";
+        document.body.append(temporary);
+        temporary.select();
+        const copied = document.execCommand("copy");
+        temporary.remove();
+        if (!copied) throw new Error("copy failed");
+      }
+      setActionError(undefined);
+    } catch {
+      setActionError("コピーできませんでした。");
     }
   }
 
@@ -457,11 +547,7 @@ export function App() {
           <p className="eyebrow">REMOTE CONTROL</p>
           <h1>Herdr Remote</h1>
         </div>
-        <button
-          className="refresh-button"
-          onClick={() => void refreshNavigation()}
-          type="button"
-        >
+        <button className="refresh-button" onClick={refreshAll} type="button">
           {isRefreshing ? "更新中" : "更新"}
         </button>
       </header>
@@ -557,18 +643,71 @@ export function App() {
       <section className="output-panel" aria-label="出力">
         <div className="section-heading">
           <h2>出力</h2>
-          {selectedAgent && <Status status={selectedAgent.status} />}
+          <div className="output-actions">
+            {selectedAgent && <Status status={selectedAgent.status} />}
+            <button
+              type="button"
+              disabled={!output}
+              onClick={() => void copyOutput()}
+            >
+              コピー
+            </button>
+            <button
+              type="button"
+              disabled={!output || isAtOutputEnd}
+              onClick={() => {
+                if (outputElement.current)
+                  outputElement.current.scrollTop =
+                    outputElement.current.scrollHeight;
+                wasAtOutputEnd.current = true;
+                setIsAtOutputEnd(true);
+              }}
+            >
+              最新へ
+            </button>
+          </div>
         </div>
         {!target && (
           <p className="empty">ペインまたは Agent を選択してください。</p>
         )}
         {target && !output && <p className="empty">出力を読み込んでいます。</p>}
-        {output && <pre>{output.text || "（出力はありません）"}</pre>}
+        {output && (
+          <pre
+            ref={outputElement}
+            onScroll={(event) => {
+              const element = event.currentTarget;
+              outputScrollTop.current = element.scrollTop;
+              const atEnd =
+                element.scrollHeight -
+                  element.scrollTop -
+                  element.clientHeight <
+                32;
+              wasAtOutputEnd.current = atEnd;
+              setIsAtOutputEnd(atEnd);
+            }}
+          >
+            {output.text || "（出力はありません）"}
+          </pre>
+        )}
+        {output && lastOutputAt && (
+          <p className="hint">
+            最終更新: {new Date(lastOutputAt).toLocaleTimeString("ja-JP")}
+            {Date.now() - lastOutputAt > 12000 ? " · 古い出力を表示中" : ""}
+          </p>
+        )}
         {output?.truncated && (
           <p className="hint">表示は直近の出力に省略されています。</p>
         )}
       </section>
       <section className="controls" aria-label="入力">
+        <p className="destination">
+          送信先:{" "}
+          {target
+            ? target.kind === "agent"
+              ? `Agent ${selectedAgent?.name ?? selectedAgent?.kind ?? target.paneId}（プロンプト）`
+              : `ペイン ${panes.find((pane) => pane.id === target.paneId)?.title ?? target.paneId}（テキスト）`
+            : "未選択"}
+        </p>
         <label htmlFor="command">
           {target?.kind === "agent" ? "Agent へのプロンプト" : "テキストを送信"}
         </label>
