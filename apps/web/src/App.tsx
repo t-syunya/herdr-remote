@@ -55,6 +55,21 @@ type SpecialKey =
 
 class HerdrUnavailableRequestError extends Error {}
 class TargetNotFoundRequestError extends Error {}
+class RequestTimedOutError extends Error {}
+
+function isRequestTimeout(cause: unknown) {
+  return cause instanceof DOMException && cause.name === "TimeoutError";
+}
+
+function isConnectionFailure(cause: unknown) {
+  return cause instanceof TypeError || isRequestTimeout(cause);
+}
+
+function errorMessage(cause: unknown, fallback: string) {
+  if (isRequestTimeout(cause))
+    return "通信がタイムアウトしました。接続状態を確認してください。";
+  return cause instanceof Error ? cause.message : fallback;
+}
 
 const specialKeys: ReadonlyArray<{ key: SpecialKey; label: string }> = [
   { key: "enter", label: "Enter" },
@@ -97,6 +112,7 @@ export function App() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [lastOutputAt, setLastOutputAt] = useState<number>();
+  const [isOutputStale, setIsOutputStale] = useState(false);
   const [isAtOutputEnd, setIsAtOutputEnd] = useState(true);
   const navigationRequestId = useRef(0);
   const outputRequestId = useRef(0);
@@ -115,6 +131,7 @@ export function App() {
     setTarget(undefined);
     setOutput(undefined);
     setLastOutputAt(undefined);
+    setIsOutputStale(false);
     setInput("");
     setOutputError(undefined);
     setActionError(undefined);
@@ -209,9 +226,7 @@ export function App() {
     } catch (cause) {
       if (requestId !== navigationRequestId.current) return;
       setConnectionStatus("unavailable");
-      setNavigationError(
-        cause instanceof Error ? cause.message : "接続を確認できません。",
-      );
+      setNavigationError(errorMessage(cause, "接続を確認できません。"));
     } finally {
       if (requestId === navigationRequestId.current) setIsRefreshing(false);
     }
@@ -231,44 +246,55 @@ export function App() {
               {
                 query: { paneId: target.paneId },
               },
-              { init: { signal: AbortSignal.timeout(10000) } },
+              { init: { signal: AbortSignal.timeout(15000) } },
             )
           : await api.api.panes[":paneId"].output.$get(
               {
                 param: { paneId: target.paneId },
               },
-              { init: { signal: AbortSignal.timeout(10000) } },
+              { init: { signal: AbortSignal.timeout(15000) } },
             );
       if (!response.ok)
         throw response.status === 404
           ? new TargetNotFoundRequestError(
               await messageFor(response, "操作対象が見つかりません。"),
             )
-          : response.status === 503
+          : response.status === 503 || response.status === 504
             ? new HerdrUnavailableRequestError(
-                await messageFor(response, "Herdr に接続できません。"),
+                await messageFor(
+                  response,
+                  response.status === 504
+                    ? "Herdr の応答がタイムアウトしました。"
+                    : "Herdr に接続できません。",
+                ),
               )
             : new Error(await messageFor(response, "出力を取得できません。"));
       const nextOutput = (await response.json()) as { output: PaneOutput };
       if (requestId !== outputRequestId.current) return;
       setOutput(nextOutput.output);
       setLastOutputAt(Date.now());
+      setIsOutputStale(false);
       setOutputError(undefined);
       setConnectionStatus("connected");
     } catch (cause) {
       if (requestId !== outputRequestId.current) return;
       if (
         cause instanceof HerdrUnavailableRequestError ||
-        cause instanceof TypeError
+        isConnectionFailure(cause)
       ) {
         setConnectionStatus("unavailable");
       }
       if (cause instanceof TargetNotFoundRequestError) clearTarget();
-      setOutputError(
-        cause instanceof Error ? cause.message : "出力を取得できません。",
-      );
+      setOutputError(errorMessage(cause, "出力を取得できません。"));
     }
   }, [target]);
+
+  useEffect(() => {
+    if (!lastOutputAt) return;
+    const delay = Math.max(0, lastOutputAt + 12000 - Date.now());
+    const timeout = window.setTimeout(() => setIsOutputStale(true), delay);
+    return () => window.clearTimeout(timeout);
+  }, [lastOutputAt]);
 
   useLayoutEffect(() => {
     const element = outputElement.current;
@@ -287,9 +313,14 @@ export function App() {
     try {
       const response = await api.api.agents.$get();
       if (!response.ok)
-        throw response.status === 503
+        throw response.status === 503 || response.status === 504
           ? new HerdrUnavailableRequestError(
-              await messageFor(response, "Herdr に接続できません。"),
+              await messageFor(
+                response,
+                response.status === 504
+                  ? "Herdr の応答がタイムアウトしました。"
+                  : "Herdr に接続できません。",
+              ),
             )
           : new Error(await messageFor(response, "Agent を取得できません。"));
       const nextAgents = (await response.json()) as { agents: Agent[] };
@@ -310,13 +341,11 @@ export function App() {
       if (requestId !== agentsRequestId.current) return;
       if (
         cause instanceof HerdrUnavailableRequestError ||
-        cause instanceof TypeError
+        isConnectionFailure(cause)
       ) {
         setConnectionStatus("unavailable");
       }
-      setAgentsError(
-        cause instanceof Error ? cause.message : "Agent を取得できません。",
-      );
+      setAgentsError(errorMessage(cause, "Agent を取得できません。"));
     }
   }, [clearTarget]);
 
@@ -368,8 +397,12 @@ export function App() {
       const response = await api.api.workspaces[":workspaceId"].tabs.$get({
         param: { workspaceId: nextWorkspaceId },
       });
-      if (!response.ok)
+      if (requestId !== navigationRequestId.current) return;
+      if (!response.ok) {
+        if (response.status === 503 || response.status === 504)
+          setConnectionStatus("unavailable");
         throw new Error(await messageFor(response, "タブを取得できません。"));
+      }
       const nextTabs = ((await response.json()) as { tabs: Tab[] }).tabs;
       const nextTabId = nextTabs[0]?.id;
       let nextPanes: Pane[] = [];
@@ -377,10 +410,14 @@ export function App() {
         const panesResponse = await api.api.tabs[":tabId"].panes.$get({
           param: { tabId: nextTabId },
         });
-        if (!panesResponse.ok)
+        if (requestId !== navigationRequestId.current) return;
+        if (!panesResponse.ok) {
+          if (panesResponse.status === 503 || panesResponse.status === 504)
+            setConnectionStatus("unavailable");
           throw new Error(
             await messageFor(panesResponse, "ペインを取得できません。"),
           );
+        }
         nextPanes = ((await panesResponse.json()) as { panes: Pane[] }).panes;
       }
       if (requestId !== navigationRequestId.current) return;
@@ -391,9 +428,8 @@ export function App() {
       setNavigationError(undefined);
     } catch (cause) {
       if (requestId !== navigationRequestId.current) return;
-      setNavigationError(
-        cause instanceof Error ? cause.message : "タブを取得できません。",
-      );
+      if (isConnectionFailure(cause)) setConnectionStatus("unavailable");
+      setNavigationError(errorMessage(cause, "タブを取得できません。"));
     }
   }
 
@@ -408,17 +444,20 @@ export function App() {
       const response = await api.api.tabs[":tabId"].panes.$get({
         param: { tabId: nextTabId },
       });
-      if (!response.ok)
+      if (requestId !== navigationRequestId.current) return;
+      if (!response.ok) {
+        if (response.status === 503 || response.status === 504)
+          setConnectionStatus("unavailable");
         throw new Error(await messageFor(response, "ペインを取得できません。"));
+      }
       const nextPanes = (await response.json()) as { panes: Pane[] };
       if (requestId !== navigationRequestId.current) return;
       setPanes(nextPanes.panes);
       setNavigationError(undefined);
     } catch (cause) {
       if (requestId !== navigationRequestId.current) return;
-      setNavigationError(
-        cause instanceof Error ? cause.message : "ペインを取得できません。",
-      );
+      if (isConnectionFailure(cause)) setConnectionStatus("unavailable");
+      setNavigationError(errorMessage(cause, "ペインを取得できません。"));
     }
   }
 
@@ -429,6 +468,7 @@ export function App() {
     setTarget(nextTarget);
     setOutput(undefined);
     setLastOutputAt(undefined);
+    setIsOutputStale(false);
     wasAtOutputEnd.current = true;
     setIsAtOutputEnd(true);
     setOutputError(undefined);
@@ -456,9 +496,11 @@ export function App() {
             );
       if (!response.ok) {
         const message = await messageFor(response, "送信できません。");
-        if (response.status === 503) {
+        if (response.status === 503 || response.status === 504) {
           setConnectionStatus("unavailable");
-          throw new HerdrUnavailableRequestError(message);
+          throw response.status === 504
+            ? new RequestTimedOutError(message)
+            : new HerdrUnavailableRequestError(message);
         }
         throw new Error(message);
       }
@@ -466,10 +508,15 @@ export function App() {
       setActionError(undefined);
       void refreshOutput();
     } catch (cause) {
-      if (cause instanceof TypeError) setConnectionStatus("unavailable");
+      if (
+        cause instanceof HerdrUnavailableRequestError ||
+        cause instanceof RequestTimedOutError ||
+        isConnectionFailure(cause)
+      ) {
+        setConnectionStatus("unavailable");
+      }
       setActionError(
-        cause instanceof TypeError ||
-          (cause instanceof DOMException && cause.name === "TimeoutError")
+        cause instanceof RequestTimedOutError || isConnectionFailure(cause)
           ? "通信が切れたため、送達を確認できません。出力を確認してから再送してください。"
           : cause instanceof Error
             ? cause.message
@@ -484,25 +531,35 @@ export function App() {
     if (!target) return;
     setIsSending(true);
     try {
-      const response = await api.api.panes[":paneId"].key.$post({
-        param: { paneId: target.paneId },
-        json: { key },
-      });
+      const response = await api.api.panes[":paneId"].key.$post(
+        {
+          param: { paneId: target.paneId },
+          json: { key },
+        },
+        { init: { signal: AbortSignal.timeout(15000) } },
+      );
       if (!response.ok) {
         const message = await messageFor(response, "キーを送信できません。");
-        if (response.status === 503) {
+        if (response.status === 503 || response.status === 504) {
           setConnectionStatus("unavailable");
-          throw new HerdrUnavailableRequestError(message);
+          throw response.status === 504
+            ? new RequestTimedOutError(message)
+            : new HerdrUnavailableRequestError(message);
         }
         throw new Error(message);
       }
       setActionError(undefined);
       void refreshOutput();
     } catch (cause) {
-      if (cause instanceof TypeError) setConnectionStatus("unavailable");
+      if (
+        cause instanceof HerdrUnavailableRequestError ||
+        cause instanceof RequestTimedOutError ||
+        isConnectionFailure(cause)
+      ) {
+        setConnectionStatus("unavailable");
+      }
       setActionError(
-        cause instanceof TypeError ||
-          (cause instanceof DOMException && cause.name === "TimeoutError")
+        cause instanceof RequestTimedOutError || isConnectionFailure(cause)
           ? "通信が切れたため、キーの送達を確認できません。出力を確認してから操作してください。"
           : cause instanceof Error
             ? cause.message
@@ -692,7 +749,7 @@ export function App() {
         {output && lastOutputAt && (
           <p className="hint">
             最終更新: {new Date(lastOutputAt).toLocaleTimeString("ja-JP")}
-            {Date.now() - lastOutputAt > 12000 ? " · 古い出力を表示中" : ""}
+            {isOutputStale ? " · 古い出力を表示中" : ""}
           </p>
         )}
         {output?.truncated && (
