@@ -88,6 +88,17 @@ npx --yes pnpm@10.24.0 dev
 開発時は Web が `http://127.0.0.1:5173`、Server が `http://127.0.0.1:8787` で起動する。
 Vite の開発プロキシが `/api` を Server へ転送する。
 
+### Docker Compose
+
+次を実行する。
+
+```sh
+make up
+make down
+```
+
+`make up` は Mac 上に Herdr Unix ソケットからの認証付き TCP 中継を起動し、Compose の開発環境を立ち上げる。中継は接続ごとのチャレンジ応答認証を使い、Herdr ソケット自体はコンテナやネットワークへ直接公開しない。`make down` は Compose と中継を停止する。Tailscale を起動してから `make up` を実行し、Web は `http://<Mac の Tailscale IPv4>:5173` で開く。
+
 ### Tailscale 経由で起動
 
 Mac で Tailscale を起動した状態で次を実行する。

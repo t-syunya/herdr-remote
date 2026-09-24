@@ -1,0 +1,13 @@
+services:
+  herdr-remote:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    init: true
+    environment:
+      DEV_HOST: 0.0.0.0
+      HERDR_RELAY_HOST: host.docker.internal
+      HERDR_RELAY_PORT: ${HERDR_RELAY_PORT:-18787}
+      HERDR_RELAY_TOKEN: ${HERDR_RELAY_TOKEN:?Run make up to start the authenticated Herdr relay.}
+    ports:
+      - "${DEV_HOST:-127.0.0.1}:5173:5173"

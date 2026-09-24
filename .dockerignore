@@ -1,0 +1,14 @@
+.git
+node_modules
+**/node_modules
+.pnpm-store
+dist
+**/dist
+coverage
+**/coverage
+.vite
+**/.vite
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
