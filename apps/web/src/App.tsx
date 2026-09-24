@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { api } from "./api";
 
@@ -38,6 +44,12 @@ type PaneOutput = { text: string; truncated: boolean };
 type ApiFailure = { error?: { message?: string } };
 type ConnectionStatus = "checking" | "connected" | "unavailable";
 type Target = { kind: "pane" | "agent"; paneId: string };
+type OutputAnchor = {
+  line: string;
+  before: string[];
+  after: string[];
+  offset: number;
+};
 type SpecialKey =
   | "enter"
   | "escape"
@@ -49,6 +61,82 @@ type SpecialKey =
 
 class HerdrUnavailableRequestError extends Error {}
 class TargetNotFoundRequestError extends Error {}
+class RequestOutcomeUnknownError extends Error {}
+
+function isRequestTimeout(cause: unknown) {
+  return cause instanceof DOMException && cause.name === "TimeoutError";
+}
+
+function isConnectionFailure(cause: unknown) {
+  return cause instanceof TypeError || isRequestTimeout(cause);
+}
+
+function errorMessage(cause: unknown, fallback: string) {
+  if (isRequestTimeout(cause))
+    return "通信がタイムアウトしました。接続状態を確認してください。";
+  return cause instanceof Error ? cause.message : fallback;
+}
+
+function outputLines(element: HTMLElement) {
+  return Array.from(
+    element.querySelectorAll<HTMLElement>("[data-output-line]"),
+  );
+}
+
+function captureOutputAnchor(element: HTMLElement): OutputAnchor | undefined {
+  const rows = outputLines(element);
+  const scrollTop = element.scrollTop;
+  const scrollportTop = element.getBoundingClientRect().top + element.clientTop;
+  const index = rows.findIndex((row) => {
+    const top = row.getBoundingClientRect().top - scrollportTop + scrollTop;
+    return top + row.getBoundingClientRect().height > scrollTop;
+  });
+  if (index < 0) return undefined;
+
+  const lines = rows.map((row) => row.textContent ?? "");
+  const top =
+    rows[index].getBoundingClientRect().top - scrollportTop + scrollTop;
+  return {
+    line: lines[index],
+    before: lines.slice(Math.max(0, index - 2), index),
+    after: lines.slice(index + 1, index + 3),
+    offset: scrollTop - top,
+  };
+}
+
+function findOutputAnchorIndex(lines: string[], anchor: OutputAnchor) {
+  let bestIndex = -1;
+  let bestScore = 0;
+  let tied = false;
+  for (let index = 0; index < lines.length; index += 1) {
+    if (lines[index] !== anchor.line) continue;
+    let score = 0;
+    for (let distance = 1; distance <= anchor.before.length; distance += 1) {
+      if (
+        lines[index - distance] ===
+        anchor.before[anchor.before.length - distance]
+      ) {
+        score += 1;
+      }
+    }
+    for (let distance = 1; distance <= anchor.after.length; distance += 1) {
+      if (lines[index + distance] === anchor.after[distance - 1]) score += 1;
+    }
+    if (score > bestScore) {
+      bestIndex = index;
+      bestScore = score;
+      tied = false;
+    } else if (score > 0 && score === bestScore) {
+      tied = true;
+    }
+  }
+  if (anchor.before.length === 0 && anchor.after.length === 0) {
+    return lines.filter((line) => line === anchor.line).length === 1
+      ? lines.indexOf(anchor.line)
+      : -1;
+  }
+  return bestScore > 0 && !tied ? bestIndex : -1;
+}
 
 const specialKeys: ReadonlyArray<{ key: SpecialKey; label: string }> = [
   { key: "enter", label: "Enter" },
@@ -88,8 +176,12 @@ export function App() {
   const [outputError, setOutputError] = useState<string>();
   const [agentsError, setAgentsError] = useState<string>();
   const [actionError, setActionError] = useState<string>();
+  const [copyError, setCopyError] = useState<string>();
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [lastOutputAt, setLastOutputAt] = useState<number>();
+  const [isOutputStale, setIsOutputStale] = useState(false);
+  const [isAtOutputEnd, setIsAtOutputEnd] = useState(true);
   const navigationRequestId = useRef(0);
   const outputRequestId = useRef(0);
   const agentsRequestId = useRef(0);
@@ -97,15 +189,22 @@ export function App() {
   const workspaceIdRef = useRef<string | undefined>(undefined);
   const tabIdRef = useRef<string | undefined>(undefined);
   const isPolling = useRef(false);
+  const outputElement = useRef<HTMLPreElement>(null);
+  const wasAtOutputEnd = useRef(true);
+  const outputAnchor = useRef<OutputAnchor | undefined>(undefined);
 
   const clearTarget = useCallback(() => {
     ++outputRequestId.current;
     targetRef.current = undefined;
     setTarget(undefined);
     setOutput(undefined);
+    setLastOutputAt(undefined);
+    setIsOutputStale(false);
     setInput("");
     setOutputError(undefined);
     setActionError(undefined);
+    setCopyError(undefined);
+    outputAnchor.current = undefined;
   }, []);
 
   const refreshNavigation = useCallback(async () => {
@@ -197,9 +296,7 @@ export function App() {
     } catch (cause) {
       if (requestId !== navigationRequestId.current) return;
       setConnectionStatus("unavailable");
-      setNavigationError(
-        cause instanceof Error ? cause.message : "接続を確認できません。",
-      );
+      setNavigationError(errorMessage(cause, "接続を確認できません。"));
     } finally {
       if (requestId === navigationRequestId.current) setIsRefreshing(false);
     }
@@ -215,50 +312,101 @@ export function App() {
     try {
       const response =
         target.kind === "agent"
-          ? await api.api.agents.output.$get({
-              query: { paneId: target.paneId },
-            })
-          : await api.api.panes[":paneId"].output.$get({
-              param: { paneId: target.paneId },
-            });
+          ? await api.api.agents.output.$get(
+              {
+                query: { paneId: target.paneId },
+              },
+              { init: { signal: AbortSignal.timeout(15000) } },
+            )
+          : await api.api.panes[":paneId"].output.$get(
+              {
+                param: { paneId: target.paneId },
+              },
+              { init: { signal: AbortSignal.timeout(15000) } },
+            );
       if (!response.ok)
         throw response.status === 404
           ? new TargetNotFoundRequestError(
               await messageFor(response, "操作対象が見つかりません。"),
             )
-          : response.status === 503
+          : response.status === 503 || response.status === 504
             ? new HerdrUnavailableRequestError(
-                await messageFor(response, "Herdr に接続できません。"),
+                await messageFor(
+                  response,
+                  response.status === 504
+                    ? "Herdr の応答がタイムアウトしました。"
+                    : "Herdr に接続できません。",
+                ),
               )
             : new Error(await messageFor(response, "出力を取得できません。"));
       const nextOutput = (await response.json()) as { output: PaneOutput };
       if (requestId !== outputRequestId.current) return;
       setOutput(nextOutput.output);
+      setLastOutputAt(Date.now());
+      setIsOutputStale(false);
       setOutputError(undefined);
       setConnectionStatus("connected");
     } catch (cause) {
       if (requestId !== outputRequestId.current) return;
       if (
         cause instanceof HerdrUnavailableRequestError ||
-        cause instanceof TypeError
+        isConnectionFailure(cause)
       ) {
         setConnectionStatus("unavailable");
       }
       if (cause instanceof TargetNotFoundRequestError) clearTarget();
-      setOutputError(
-        cause instanceof Error ? cause.message : "出力を取得できません。",
-      );
+      setOutputError(errorMessage(cause, "出力を取得できません。"));
     }
   }, [target]);
+
+  useEffect(() => {
+    if (!lastOutputAt) return;
+    const delay = Math.max(0, lastOutputAt + 12000 - Date.now());
+    const timeout = window.setTimeout(() => setIsOutputStale(true), delay);
+    return () => window.clearTimeout(timeout);
+  }, [lastOutputAt]);
+
+  useLayoutEffect(() => {
+    const element = outputElement.current;
+    if (!element || !output) return;
+    if (wasAtOutputEnd.current) {
+      element.scrollTop = element.scrollHeight;
+    } else {
+      const rows = outputLines(element);
+      const lines = rows.map((row) => row.textContent ?? "");
+      const anchor = outputAnchor.current;
+      const index = anchor ? findOutputAnchorIndex(lines, anchor) : -1;
+      const row = index >= 0 ? rows[index] : undefined;
+      if (row && anchor) {
+        const scrollportTop =
+          element.getBoundingClientRect().top + element.clientTop;
+        const top =
+          row.getBoundingClientRect().top - scrollportTop + element.scrollTop;
+        element.scrollTop = top + anchor.offset;
+      } else {
+        element.scrollTop = 0;
+      }
+    }
+    const atEnd =
+      element.scrollHeight - element.scrollTop - element.clientHeight < 32;
+    wasAtOutputEnd.current = atEnd;
+    outputAnchor.current = captureOutputAnchor(element);
+    setIsAtOutputEnd(atEnd);
+  }, [output]);
 
   const refreshAgents = useCallback(async () => {
     const requestId = ++agentsRequestId.current;
     try {
       const response = await api.api.agents.$get();
       if (!response.ok)
-        throw response.status === 503
+        throw response.status === 503 || response.status === 504
           ? new HerdrUnavailableRequestError(
-              await messageFor(response, "Herdr に接続できません。"),
+              await messageFor(
+                response,
+                response.status === 504
+                  ? "Herdr の応答がタイムアウトしました。"
+                  : "Herdr に接続できません。",
+              ),
             )
           : new Error(await messageFor(response, "Agent を取得できません。"));
       const nextAgents = (await response.json()) as { agents: Agent[] };
@@ -279,15 +427,19 @@ export function App() {
       if (requestId !== agentsRequestId.current) return;
       if (
         cause instanceof HerdrUnavailableRequestError ||
-        cause instanceof TypeError
+        isConnectionFailure(cause)
       ) {
         setConnectionStatus("unavailable");
       }
-      setAgentsError(
-        cause instanceof Error ? cause.message : "Agent を取得できません。",
-      );
+      setAgentsError(errorMessage(cause, "Agent を取得できません。"));
     }
   }, [clearTarget]);
+
+  const refreshAll = useCallback(() => {
+    void refreshNavigation();
+    void refreshOutput();
+    void refreshAgents();
+  }, [refreshAgents, refreshNavigation, refreshOutput]);
 
   useEffect(() => {
     void refreshNavigation();
@@ -305,6 +457,17 @@ export function App() {
     }, 4000);
     return () => window.clearInterval(interval);
   }, [refreshAgents, refreshOutput]);
+  useEffect(() => {
+    const refreshWhenActive = () => {
+      if (document.visibilityState === "visible") refreshAll();
+    };
+    window.addEventListener("online", refreshAll);
+    document.addEventListener("visibilitychange", refreshWhenActive);
+    return () => {
+      window.removeEventListener("online", refreshAll);
+      document.removeEventListener("visibilitychange", refreshWhenActive);
+    };
+  }, [refreshAll]);
 
   async function selectWorkspace(nextWorkspaceId: string) {
     const requestId = ++navigationRequestId.current;
@@ -320,8 +483,12 @@ export function App() {
       const response = await api.api.workspaces[":workspaceId"].tabs.$get({
         param: { workspaceId: nextWorkspaceId },
       });
-      if (!response.ok)
+      if (requestId !== navigationRequestId.current) return;
+      if (!response.ok) {
+        if (response.status === 503 || response.status === 504)
+          setConnectionStatus("unavailable");
         throw new Error(await messageFor(response, "タブを取得できません。"));
+      }
       const nextTabs = ((await response.json()) as { tabs: Tab[] }).tabs;
       const nextTabId = nextTabs[0]?.id;
       let nextPanes: Pane[] = [];
@@ -329,10 +496,14 @@ export function App() {
         const panesResponse = await api.api.tabs[":tabId"].panes.$get({
           param: { tabId: nextTabId },
         });
-        if (!panesResponse.ok)
+        if (requestId !== navigationRequestId.current) return;
+        if (!panesResponse.ok) {
+          if (panesResponse.status === 503 || panesResponse.status === 504)
+            setConnectionStatus("unavailable");
           throw new Error(
             await messageFor(panesResponse, "ペインを取得できません。"),
           );
+        }
         nextPanes = ((await panesResponse.json()) as { panes: Pane[] }).panes;
       }
       if (requestId !== navigationRequestId.current) return;
@@ -343,9 +514,8 @@ export function App() {
       setNavigationError(undefined);
     } catch (cause) {
       if (requestId !== navigationRequestId.current) return;
-      setNavigationError(
-        cause instanceof Error ? cause.message : "タブを取得できません。",
-      );
+      if (isConnectionFailure(cause)) setConnectionStatus("unavailable");
+      setNavigationError(errorMessage(cause, "タブを取得できません。"));
     }
   }
 
@@ -360,17 +530,20 @@ export function App() {
       const response = await api.api.tabs[":tabId"].panes.$get({
         param: { tabId: nextTabId },
       });
-      if (!response.ok)
+      if (requestId !== navigationRequestId.current) return;
+      if (!response.ok) {
+        if (response.status === 503 || response.status === 504)
+          setConnectionStatus("unavailable");
         throw new Error(await messageFor(response, "ペインを取得できません。"));
+      }
       const nextPanes = (await response.json()) as { panes: Pane[] };
       if (requestId !== navigationRequestId.current) return;
       setPanes(nextPanes.panes);
       setNavigationError(undefined);
     } catch (cause) {
       if (requestId !== navigationRequestId.current) return;
-      setNavigationError(
-        cause instanceof Error ? cause.message : "ペインを取得できません。",
-      );
+      if (isConnectionFailure(cause)) setConnectionStatus("unavailable");
+      setNavigationError(errorMessage(cause, "ペインを取得できません。"));
     }
   }
 
@@ -380,8 +553,14 @@ export function App() {
     targetRef.current = nextTarget;
     setTarget(nextTarget);
     setOutput(undefined);
+    setLastOutputAt(undefined);
+    setIsOutputStale(false);
+    outputAnchor.current = undefined;
+    wasAtOutputEnd.current = true;
+    setIsAtOutputEnd(true);
     setOutputError(undefined);
     setActionError(undefined);
+    setCopyError(undefined);
   }
 
   async function sendText() {
@@ -390,18 +569,24 @@ export function App() {
     try {
       const response =
         target.kind === "agent"
-          ? await api.api.agents.prompt.$post({
-              json: { paneId: target.paneId, prompt: input },
-            })
-          : await api.api.panes[":paneId"].text.$post({
-              param: { paneId: target.paneId },
-              json: { text: input },
-            });
+          ? await api.api.agents.prompt.$post(
+              {
+                json: { paneId: target.paneId, prompt: input },
+              },
+              { init: { signal: AbortSignal.timeout(60000) } },
+            )
+          : await api.api.panes[":paneId"].text.$post(
+              {
+                param: { paneId: target.paneId },
+                json: { text: input },
+              },
+              { init: { signal: AbortSignal.timeout(15000) } },
+            );
       if (!response.ok) {
         const message = await messageFor(response, "送信できません。");
-        if (response.status === 503) {
+        if (response.status === 503 || response.status === 504) {
           setConnectionStatus("unavailable");
-          throw new HerdrUnavailableRequestError(message);
+          throw new RequestOutcomeUnknownError(message);
         }
         throw new Error(message);
       }
@@ -409,9 +594,20 @@ export function App() {
       setActionError(undefined);
       void refreshOutput();
     } catch (cause) {
-      if (cause instanceof TypeError) setConnectionStatus("unavailable");
+      if (
+        cause instanceof HerdrUnavailableRequestError ||
+        cause instanceof RequestOutcomeUnknownError ||
+        isConnectionFailure(cause)
+      ) {
+        setConnectionStatus("unavailable");
+      }
       setActionError(
-        cause instanceof Error ? cause.message : "送信できません。",
+        cause instanceof RequestOutcomeUnknownError ||
+          isConnectionFailure(cause)
+          ? "送信結果を確認できません。出力を確認してから再送してください。"
+          : cause instanceof Error
+            ? cause.message
+            : "送信できません。",
       );
     } finally {
       setIsSending(false);
@@ -422,27 +618,64 @@ export function App() {
     if (!target) return;
     setIsSending(true);
     try {
-      const response = await api.api.panes[":paneId"].key.$post({
-        param: { paneId: target.paneId },
-        json: { key },
-      });
+      const response = await api.api.panes[":paneId"].key.$post(
+        {
+          param: { paneId: target.paneId },
+          json: { key },
+        },
+        { init: { signal: AbortSignal.timeout(15000) } },
+      );
       if (!response.ok) {
         const message = await messageFor(response, "キーを送信できません。");
-        if (response.status === 503) {
+        if (response.status === 503 || response.status === 504) {
           setConnectionStatus("unavailable");
-          throw new HerdrUnavailableRequestError(message);
+          throw new RequestOutcomeUnknownError(message);
         }
         throw new Error(message);
       }
       setActionError(undefined);
       void refreshOutput();
     } catch (cause) {
-      if (cause instanceof TypeError) setConnectionStatus("unavailable");
+      if (
+        cause instanceof HerdrUnavailableRequestError ||
+        cause instanceof RequestOutcomeUnknownError ||
+        isConnectionFailure(cause)
+      ) {
+        setConnectionStatus("unavailable");
+      }
       setActionError(
-        cause instanceof Error ? cause.message : "キーを送信できません。",
+        cause instanceof RequestOutcomeUnknownError ||
+          isConnectionFailure(cause)
+          ? "キーの送信結果を確認できません。出力を確認してから操作してください。"
+          : cause instanceof Error
+            ? cause.message
+            : "キーを送信できません。",
       );
     } finally {
       setIsSending(false);
+    }
+  }
+
+  async function copyOutput() {
+    if (!output) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(output.text);
+      } else {
+        const temporary = document.createElement("textarea");
+        temporary.value = output.text;
+        temporary.setAttribute("readonly", "");
+        temporary.style.position = "fixed";
+        temporary.style.opacity = "0";
+        document.body.append(temporary);
+        temporary.select();
+        const copied = document.execCommand("copy");
+        temporary.remove();
+        if (!copied) throw new Error("copy failed");
+      }
+      setCopyError(undefined);
+    } catch {
+      setCopyError("コピーできませんでした。");
     }
   }
 
@@ -457,11 +690,7 @@ export function App() {
           <p className="eyebrow">REMOTE CONTROL</p>
           <h1>Herdr Remote</h1>
         </div>
-        <button
-          className="refresh-button"
-          onClick={() => void refreshNavigation()}
-          type="button"
-        >
+        <button className="refresh-button" onClick={refreshAll} type="button">
           {isRefreshing ? "更新中" : "更新"}
         </button>
       </header>
@@ -473,9 +702,17 @@ export function App() {
         {connectionStatus === "connected" && "Herdr に接続中"}
         {connectionStatus === "unavailable" && "Herdr に接続できません"}
       </p>
-      {(actionError ?? navigationError ?? outputError ?? agentsError) && (
+      {(actionError ??
+        copyError ??
+        navigationError ??
+        outputError ??
+        agentsError) && (
         <p className="error" role="alert">
-          {actionError ?? navigationError ?? outputError ?? agentsError}
+          {actionError ??
+            copyError ??
+            navigationError ??
+            outputError ??
+            agentsError}
         </p>
       )}
       <section className="selection-panel" aria-label="操作対象を選択">
@@ -557,18 +794,78 @@ export function App() {
       <section className="output-panel" aria-label="出力">
         <div className="section-heading">
           <h2>出力</h2>
-          {selectedAgent && <Status status={selectedAgent.status} />}
+          <div className="output-actions">
+            {selectedAgent && <Status status={selectedAgent.status} />}
+            <button
+              type="button"
+              disabled={!output}
+              onClick={() => void copyOutput()}
+            >
+              コピー
+            </button>
+            <button
+              type="button"
+              disabled={!output || isAtOutputEnd}
+              onClick={() => {
+                if (outputElement.current)
+                  outputElement.current.scrollTop =
+                    outputElement.current.scrollHeight;
+                wasAtOutputEnd.current = true;
+                outputAnchor.current = undefined;
+                setIsAtOutputEnd(true);
+              }}
+            >
+              最新へ
+            </button>
+          </div>
         </div>
         {!target && (
           <p className="empty">ペインまたは Agent を選択してください。</p>
         )}
         {target && !output && <p className="empty">出力を読み込んでいます。</p>}
-        {output && <pre>{output.text || "（出力はありません）"}</pre>}
+        {output && (
+          <pre
+            ref={outputElement}
+            onScroll={(event) => {
+              const element = event.currentTarget;
+              const atEnd =
+                element.scrollHeight -
+                  element.scrollTop -
+                  element.clientHeight <
+                32;
+              wasAtOutputEnd.current = atEnd;
+              outputAnchor.current = captureOutputAnchor(element);
+              setIsAtOutputEnd(atEnd);
+            }}
+          >
+            {(output.text || "（出力はありません）")
+              .split("\n")
+              .map((line, index) => (
+                <span className="output-line" data-output-line key={index}>
+                  {line}
+                </span>
+              ))}
+          </pre>
+        )}
+        {output && lastOutputAt && (
+          <p className="hint">
+            最終更新: {new Date(lastOutputAt).toLocaleTimeString("ja-JP")}
+            {isOutputStale ? " · 古い出力を表示中" : ""}
+          </p>
+        )}
         {output?.truncated && (
           <p className="hint">表示は直近の出力に省略されています。</p>
         )}
       </section>
       <section className="controls" aria-label="入力">
+        <p className="destination">
+          送信先:{" "}
+          {target
+            ? target.kind === "agent"
+              ? `Agent ${selectedAgent?.name ?? selectedAgent?.kind ?? target.paneId}（プロンプト）`
+              : `ペイン ${panes.find((pane) => pane.id === target.paneId)?.title ?? target.paneId}（テキスト）`
+            : "未選択"}
+        </p>
         <label htmlFor="command">
           {target?.kind === "agent" ? "Agent へのプロンプト" : "テキストを送信"}
         </label>
