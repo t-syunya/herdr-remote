@@ -8,6 +8,7 @@ const socketPath =
 const host = "127.0.0.1";
 const port = Number(process.env.HERDR_RELAY_PORT ?? "18787");
 const token = process.env.HERDR_RELAY_TOKEN;
+const clients = new Set();
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
   throw new Error("HERDR_RELAY_PORT must be a valid TCP port.");
@@ -15,13 +16,17 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 if (!token) throw new Error("HERDR_RELAY_TOKEN is required.");
 
 const server = createServer((client) => {
+  clients.add(client);
   let authenticated = false;
   let header = Buffer.alloc(0);
   let herdr;
   const challenge = randomBytes(32).toString("hex");
 
   client.on("error", () => herdr?.destroy());
-  client.on("close", () => herdr?.destroy());
+  client.on("close", () => {
+    clients.delete(client);
+    herdr?.destroy();
+  });
   client.setTimeout(5_000, () => client.destroy());
   client.write(`${challenge}\n`);
 
@@ -70,5 +75,8 @@ server.listen(port, host, () => {
 });
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
-  process.on(signal, () => server.close(() => process.exit(0)));
+  process.on(signal, () => {
+    for (const client of clients) client.destroy();
+    server.close(() => process.exit(0));
+  });
 }
