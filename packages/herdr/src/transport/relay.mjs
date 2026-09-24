@@ -1,10 +1,11 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { connect, createServer } from "node:net";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 const socketPath =
-  process.env.HERDR_SOCKET_PATH ??
-  `${process.env.HOME}/.config/herdr/herdr.sock`;
-const host = "0.0.0.0";
+  process.env.HERDR_SOCKET_PATH || join(homedir(), ".config/herdr/herdr.sock");
+const host = "127.0.0.1";
 const port = Number(process.env.HERDR_RELAY_PORT ?? "18787");
 const token = process.env.HERDR_RELAY_TOKEN;
 
@@ -16,7 +17,11 @@ if (!token) throw new Error("HERDR_RELAY_TOKEN is required.");
 const server = createServer((client) => {
   let authenticated = false;
   let header = Buffer.alloc(0);
+  let herdr;
   const challenge = randomBytes(32).toString("hex");
+
+  client.on("error", () => herdr?.destroy());
+  client.on("close", () => herdr?.destroy());
   client.setTimeout(5_000, () => client.destroy());
   client.write(`${challenge}\n`);
 
@@ -44,10 +49,8 @@ const server = createServer((client) => {
     client.setTimeout(0);
     const pendingRequest = header.subarray(newline + 1);
     client.pause();
-    const herdr = connect(socketPath);
+    herdr = connect(socketPath);
     herdr.on("error", () => client.destroy());
-    client.on("error", () => herdr.destroy());
-    client.on("close", () => herdr.destroy());
     herdr.on("connect", () => {
       if (pendingRequest.length) herdr.write(pendingRequest);
       client.pipe(herdr);

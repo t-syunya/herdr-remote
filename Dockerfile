@@ -16,6 +16,6 @@ COPY . .
 
 ENV DEV_HOST=0.0.0.0
 
-EXPOSE 5173
+EXPOSE 5174
 
 CMD ["pnpm", "dev"]
