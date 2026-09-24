@@ -7,7 +7,7 @@ services:
     network_mode: host
     environment:
       DEV_HOST: 127.0.0.1
-      DEV_PORT: 5174
+      DEV_PORT: ${WEB_TARGET_PORT:-5174}
       HERDR_RELAY_HOST: 127.0.0.1
       HERDR_RELAY_PORT: ${HERDR_RELAY_PORT:-18787}
       HERDR_RELAY_TOKEN: ${HERDR_RELAY_TOKEN:?Run make up to start the authenticated Herdr relay.}

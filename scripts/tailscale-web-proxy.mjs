@@ -4,6 +4,7 @@ const host = process.env.DEV_HOST;
 const port = Number(process.env.WEB_PORT ?? "5173");
 const targetHost = "127.0.0.1";
 const targetPort = Number(process.env.WEB_TARGET_PORT ?? "5174");
+const sockets = new Set();
 
 const octets = host?.split(".").map(Number);
 if (
@@ -19,6 +20,10 @@ if (
 
 const server = createServer((client) => {
   const upstream = connect(targetPort, targetHost);
+  sockets.add(client);
+  sockets.add(upstream);
+  client.on("close", () => sockets.delete(client));
+  upstream.on("close", () => sockets.delete(upstream));
   client.on("error", () => upstream.destroy());
   client.on("close", () => upstream.destroy());
   upstream.on("error", () => client.destroy());
@@ -37,5 +42,8 @@ server.listen(port, host, () => {
 });
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
-  process.on(signal, () => server.close(() => process.exit(0)));
+  process.on(signal, () => {
+    for (const socket of sockets) socket.destroy();
+    server.close(() => process.exit(0));
+  });
 }

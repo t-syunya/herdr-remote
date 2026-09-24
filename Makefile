@@ -4,12 +4,15 @@ COMPOSE ?= docker compose
 DEV_HOST ?= $(shell tailscale ip -4 2>/dev/null | awk -F. 'NF == 4 && $$1 == 100 && $$2 >= 64 && $$2 <= 127 { print; exit }')
 HERDR_SOCKET_PATH ?= $(HOME)/.config/herdr/herdr.sock
 HERDR_RELAY_PORT ?= 18787
+WEB_PORT ?= 5173
+WEB_TARGET_PORT ?= 5174
 RELAY_PID_FILE := /tmp/herdr-remote-socket-relay.pid
 RELAY_TOKEN_FILE := /tmp/herdr-remote-socket-relay.token
 RELAY_CONFIG_FILE := /tmp/herdr-remote-socket-relay.conf
 WEB_PROXY_PID_FILE := /tmp/herdr-remote-web-proxy.pid
+WEB_PROXY_CONFIG_FILE := /tmp/herdr-remote-web-proxy.conf
 
-export DEV_HOST HERDR_SOCKET_PATH HERDR_RELAY_PORT
+export DEV_HOST HERDR_SOCKET_PATH HERDR_RELAY_PORT WEB_PORT WEB_TARGET_PORT
 
 up:
 	@set -e; \
@@ -44,10 +47,24 @@ up:
 	HERDR_RELAY_TOKEN="$$token" $(COMPOSE) up -d --build; \
 	if [ -f "$(WEB_PROXY_PID_FILE)" ] && \
 		ps -p "$$(cat "$(WEB_PROXY_PID_FILE)")" -o command= | grep -Fq 'scripts/tailscale-web-proxy.mjs'; then \
-		echo "Tailscale web proxy is already running (PID $$(cat "$(WEB_PROXY_PID_FILE)"))."; \
+		pid="$$(cat "$(WEB_PROXY_PID_FILE)")"; \
+		if printf '%s\n%s\n%s\n' "$$DEV_HOST" "$$WEB_PORT" "$$WEB_TARGET_PORT" | cmp -s - "$(WEB_PROXY_CONFIG_FILE)"; then \
+			echo "Tailscale web proxy is already running (PID $$pid)."; \
+		else \
+			kill "$$pid"; \
+			for attempt in 1 2 3 4 5; do \
+				if ! kill -0 "$$pid" 2>/dev/null; then break; fi; \
+				sleep 1; \
+			done; \
+			if kill -0 "$$pid" 2>/dev/null; then echo "Could not stop the existing Tailscale web proxy (PID $$pid)."; exit 1; fi; \
+			DEV_HOST="$(DEV_HOST)" WEB_PORT="$(WEB_PORT)" WEB_TARGET_PORT="$(WEB_TARGET_PORT)" nohup node scripts/tailscale-web-proxy.mjs > /tmp/herdr-remote-web-proxy.log 2>&1 </dev/null & \
+			echo $$! > "$(WEB_PROXY_PID_FILE)"; \
+			(umask 077; printf '%s\n%s\n%s\n' "$$DEV_HOST" "$$WEB_PORT" "$$WEB_TARGET_PORT" > "$(WEB_PROXY_CONFIG_FILE)"); \
+		fi; \
 	else \
-		DEV_HOST="$(DEV_HOST)" nohup node scripts/tailscale-web-proxy.mjs > /tmp/herdr-remote-web-proxy.log 2>&1 </dev/null & \
+		DEV_HOST="$(DEV_HOST)" WEB_PORT="$(WEB_PORT)" WEB_TARGET_PORT="$(WEB_TARGET_PORT)" nohup node scripts/tailscale-web-proxy.mjs > /tmp/herdr-remote-web-proxy.log 2>&1 </dev/null & \
 		echo $$! > "$(WEB_PROXY_PID_FILE)"; \
+		(umask 077; printf '%s\n%s\n%s\n' "$$DEV_HOST" "$$WEB_PORT" "$$WEB_TARGET_PORT" > "$(WEB_PROXY_CONFIG_FILE)"); \
 	fi; \
 	sleep 1; \
 	if ! kill -0 "$$(cat "$(WEB_PROXY_PID_FILE)")" 2>/dev/null; then cat /tmp/herdr-remote-web-proxy.log; exit 1; fi
