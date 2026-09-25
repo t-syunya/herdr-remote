@@ -455,6 +455,7 @@ export function App() {
     if (!viewport) return;
 
     const updateViewportHeight = () => {
+      if (viewport.scale !== 1) return;
       document.documentElement.style.setProperty(
         "--visual-viewport-height",
         `${viewport.height}px`,

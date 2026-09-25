@@ -30,7 +30,8 @@ button:disabled {
   margin: 0 auto;
   min-height: 100vh;
   min-height: 100dvh;
-  padding: 1rem 1rem calc(1rem + env(safe-area-inset-bottom));
+  padding: calc(1rem + env(safe-area-inset-top)) 1rem
+    calc(1rem + env(safe-area-inset-bottom));
 }
 .app-header,
 .section-heading,
@@ -193,7 +194,7 @@ textarea {
   min-height: 13rem;
 }
 pre {
-  max-height: min(48vh, calc(var(--visual-viewport-height, 100dvh) * 0.4));
+  max-height: min(48vh, calc(var(--visual-viewport-height, 100vh) * 0.4));
   overflow: auto;
   margin: 0.75rem 0 0;
   border-radius: 0.5rem;
@@ -224,7 +225,7 @@ pre {
 }
 textarea {
   min-height: 7rem;
-  max-height: min(35vh, calc(var(--visual-viewport-height, 100dvh) * 0.3));
+  max-height: min(35vh, calc(var(--visual-viewport-height, 100vh) * 0.3));
   overflow-y: auto;
   resize: vertical;
   font-size: 16px;
@@ -271,7 +272,8 @@ textarea {
 }
 @media (min-width: 42rem) {
   .app-shell {
-    padding: 1.5rem;
+    padding: calc(1.5rem + env(safe-area-inset-top)) 1.5rem
+      calc(1.5rem + env(safe-area-inset-bottom));
   }
   .controls {
     position: sticky;
