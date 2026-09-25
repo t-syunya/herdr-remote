@@ -451,6 +451,25 @@ export function App() {
     void refreshOutput();
   }, [refreshOutput]);
   useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+
+    const updateViewportHeight = () => {
+      document.documentElement.style.setProperty(
+        "--visual-viewport-height",
+        `${viewport.height}px`,
+      );
+    };
+    updateViewportHeight();
+    viewport.addEventListener("resize", updateViewportHeight);
+    viewport.addEventListener("scroll", updateViewportHeight);
+    return () => {
+      viewport.removeEventListener("resize", updateViewportHeight);
+      viewport.removeEventListener("scroll", updateViewportHeight);
+      document.documentElement.style.removeProperty("--visual-viewport-height");
+    };
+  }, []);
+  useEffect(() => {
     const interval = window.setInterval(() => {
       if (isPolling.current) return;
       isPolling.current = true;
@@ -927,14 +946,21 @@ export function App() {
             : "ペインに送るテキスト"}
         </label>
         <textarea
+          aria-describedby="command-hint"
           disabled={!target || isSending}
+          enterKeyHint="enter"
           id="command"
+          lang="ja"
           onChange={(event) => setInput(event.target.value)}
           placeholder={
             target ? "入力してください" : "先に操作対象を選択してください"
           }
+          rows={4}
           value={input}
         />
+        <p className="hint composer-hint" id="command-hint">
+          入力中はEnterで改行できます。送信は下のボタンを押してください。
+        </p>
         {target?.kind === "pane" && (
           <label className="send-enter-option">
             <input
