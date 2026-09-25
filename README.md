@@ -97,7 +97,7 @@ make up
 make down
 ```
 
-`make up` は `packages/herdr` 内の Herdr Unix ソケット中継をホストの loopback のみに起動し、Compose の開発環境を立ち上げる。中継は接続ごとのチャレンジ応答認証を使い、Herdr ソケット自体も中継ポートも外部ネットワークへ公開しない。Web はコンテナ内で loopback に bind し、ホスト側のプロキシが Tailscale IPv4 のみに公開する。`make down` は Compose と両プロセスを停止する。Web は `http://<Mac の Tailscale IPv4>:5173` で開く。
+`make up` は `packages/herdr` 内の Herdr Unix ソケット中継をホストの loopback のみに起動し、Compose Watch 付きで開発環境を立ち上げる。Compose Watch は Web/Server のソース変更をコンテナへ同期し、依存関係や `packages` の変更時に再ビルドする。watch はバックグラウンドで動き、ログは `/tmp/herdr-remote-compose-watch.log` に出力する。中継は接続ごとのチャレンジ応答認証を使い、Herdr ソケット自体も中継ポートも外部ネットワークへ公開しない。Web はコンテナ内で loopback に bind し、ホスト側のプロキシが Tailscale IPv4 のみに公開する。`make down` は Compose Watch、Compose、ホスト側プロセスを停止する。Web は `http://<Mac の Tailscale IPv4>:5173` で開く。
 
 ### Tailscale 経由で起動
 

@@ -1,6 +1,8 @@
 .PHONY: up down
 
 COMPOSE ?= docker compose
+COMPOSE_START_TIMEOUT ?= 300
+COMPOSE_STOP_TIMEOUT ?= 30
 DEV_HOST ?= $(shell tailscale ip -4 2>/dev/null | awk -F. 'NF == 4 && $$1 == 100 && $$2 >= 64 && $$2 <= 127 { print; exit }')
 HERDR_SOCKET_PATH ?= $(HOME)/.config/herdr/herdr.sock
 HERDR_RELAY_PORT ?= 18787
@@ -11,6 +13,9 @@ RELAY_TOKEN_FILE := /tmp/herdr-remote-socket-relay.token
 RELAY_CONFIG_FILE := /tmp/herdr-remote-socket-relay.conf
 WEB_PROXY_PID_FILE := /tmp/herdr-remote-web-proxy.pid
 WEB_PROXY_CONFIG_FILE := /tmp/herdr-remote-web-proxy.conf
+COMPOSE_WATCH_PID_FILE := /tmp/herdr-remote-compose-watch.pid
+COMPOSE_WATCH_LOG_FILE := /tmp/herdr-remote-compose-watch.log
+COMPOSE_WATCH_CONFIG_FILE := /tmp/herdr-remote-compose-watch.conf
 
 export DEV_HOST HERDR_SOCKET_PATH HERDR_RELAY_PORT WEB_PORT WEB_TARGET_PORT
 
@@ -44,7 +49,6 @@ up:
 	fi; \
 	sleep 1; \
 	if ! kill -0 "$$(cat "$(RELAY_PID_FILE)")" 2>/dev/null; then cat /tmp/herdr-remote-socket-relay.log; exit 1; fi; \
-	HERDR_RELAY_TOKEN="$$token" $(COMPOSE) up -d --build; \
 	if [ -f "$(WEB_PROXY_PID_FILE)" ] && \
 		ps -p "$$(cat "$(WEB_PROXY_PID_FILE)")" -o command= | grep -Fq 'scripts/tailscale-web-proxy.mjs'; then \
 		pid="$$(cat "$(WEB_PROXY_PID_FILE)")"; \
@@ -67,10 +71,68 @@ up:
 		(umask 077; printf '%s\n%s\n%s\n' "$$DEV_HOST" "$$WEB_PORT" "$$WEB_TARGET_PORT" > "$(WEB_PROXY_CONFIG_FILE)"); \
 	fi; \
 	sleep 1; \
-	if ! kill -0 "$$(cat "$(WEB_PROXY_PID_FILE)")" 2>/dev/null; then cat /tmp/herdr-remote-web-proxy.log; exit 1; fi
+	if ! kill -0 "$$(cat "$(WEB_PROXY_PID_FILE)")" 2>/dev/null; then cat /tmp/herdr-remote-web-proxy.log; exit 1; fi; \
+	watch_config_matches=0; \
+	if [ -f "$(COMPOSE_WATCH_PID_FILE)" ] && \
+		ps -p "$$(cat "$(COMPOSE_WATCH_PID_FILE)")" -o command= | grep -Fq 'scripts/compose-watch.sh'; then \
+		if { \
+			printf '%s\n%s\n%s\n' "$$HERDR_SOCKET_PATH" "$$HERDR_RELAY_PORT" "$$WEB_TARGET_PORT"; \
+			printf '%s\n' "$(COMPOSE)"; \
+			shasum -a 256 compose.yaml Dockerfile; \
+			printf '%s' "$$token" | shasum -a 256; \
+		} | cmp -s - "$(COMPOSE_WATCH_CONFIG_FILE)" && \
+			HERDR_RELAY_TOKEN="$$token" $(COMPOSE) ps --status running --services 2>/dev/null | grep -Fxq herdr-remote; then \
+			watch_config_matches=1; \
+		else \
+			pid="$$(cat "$(COMPOSE_WATCH_PID_FILE)")"; \
+			kill "$$pid" 2>/dev/null || true; \
+			remaining="$(COMPOSE_STOP_TIMEOUT)"; \
+			while [ "$$remaining" -gt 0 ] && kill -0 "$$pid" 2>/dev/null; do \
+				sleep 1; \
+				remaining=$$((remaining - 1)); \
+			done; \
+			if kill -0 "$$pid" 2>/dev/null; then echo "Could not stop the existing Compose Watch process within $(COMPOSE_STOP_TIMEOUT) seconds (PID $$pid)."; exit 1; fi; \
+		fi; \
+	fi; \
+	if [ "$$watch_config_matches" -eq 0 ]; then \
+		HERDR_RELAY_TOKEN="$$token" nohup sh scripts/compose-watch.sh $(COMPOSE) up --watch > "$(COMPOSE_WATCH_LOG_FILE)" 2>&1 </dev/null & \
+		echo $$! > "$(COMPOSE_WATCH_PID_FILE)"; \
+		(umask 077; { \
+			printf '%s\n%s\n%s\n' "$$HERDR_SOCKET_PATH" "$$HERDR_RELAY_PORT" "$$WEB_TARGET_PORT"; \
+			printf '%s\n' "$(COMPOSE)"; \
+			shasum -a 256 compose.yaml Dockerfile; \
+			printf '%s' "$$token" | shasum -a 256; \
+		} > "$(COMPOSE_WATCH_CONFIG_FILE)"); \
+	fi; \
+	watch_pid="$$(cat "$(COMPOSE_WATCH_PID_FILE)")"; \
+	remaining="$(COMPOSE_START_TIMEOUT)"; \
+	ready=0; \
+	while [ "$$remaining" -gt 0 ]; do \
+		if HERDR_RELAY_TOKEN="$$token" $(COMPOSE) ps --status running --services 2>/dev/null | grep -Fxq herdr-remote; then ready=1; break; fi; \
+		if ! kill -0 "$$watch_pid" 2>/dev/null; then cat "$(COMPOSE_WATCH_LOG_FILE)"; exit 1; fi; \
+		sleep 1; \
+		remaining=$$((remaining - 1)); \
+	done; \
+	if [ "$$ready" -ne 1 ]; then echo "Compose service did not start within $(COMPOSE_START_TIMEOUT) seconds. Logs: $(COMPOSE_WATCH_LOG_FILE)"; exit 1; fi; \
+	if ! kill -0 "$$watch_pid" 2>/dev/null; then cat "$(COMPOSE_WATCH_LOG_FILE)"; exit 1; fi; \
+	echo "Compose Watch is running. Logs: $(COMPOSE_WATCH_LOG_FILE)"
 
 down:
-	@HERDR_RELAY_TOKEN="$$(cat "$(RELAY_TOKEN_FILE)")" $(COMPOSE) down --remove-orphans
+	@set -e; \
+	if [ -f "$(COMPOSE_WATCH_PID_FILE)" ]; then \
+		pid="$$(cat "$(COMPOSE_WATCH_PID_FILE)")"; \
+		if ps -p "$$pid" -o command= | grep -Fq 'scripts/compose-watch.sh'; then \
+			kill "$$pid" 2>/dev/null || true; \
+			remaining="$(COMPOSE_STOP_TIMEOUT)"; \
+			while [ "$$remaining" -gt 0 ] && kill -0 "$$pid" 2>/dev/null; do \
+				if ! kill -0 "$$pid" 2>/dev/null; then break; fi; \
+				sleep 1; \
+				remaining=$$((remaining - 1)); \
+			done; \
+			if kill -0 "$$pid" 2>/dev/null; then echo "Could not stop the Compose Watch process within $(COMPOSE_STOP_TIMEOUT) seconds (PID $$pid)."; exit 1; fi; \
+		fi; \
+	fi; \
+	HERDR_RELAY_TOKEN="$$(cat "$(RELAY_TOKEN_FILE)")" $(COMPOSE) down --remove-orphans
 	@if [ -f "$(WEB_PROXY_PID_FILE)" ]; then \
 		pid="$$(cat "$(WEB_PROXY_PID_FILE)")"; \
 		if ps -p "$$pid" -o command= | grep -Fq 'scripts/tailscale-web-proxy.mjs'; then kill "$$pid"; fi; \
