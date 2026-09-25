@@ -174,6 +174,19 @@ textarea {
   font-size: 0.82rem;
   font-weight: 700;
 }
+.send-enter-option {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-top: 0.65rem;
+  font-size: 0.82rem;
+}
+.send-enter-option input {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  accent-color: #76d8b7;
+}
 .output-panel {
   min-height: 13rem;
 }

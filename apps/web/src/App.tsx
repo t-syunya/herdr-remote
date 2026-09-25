@@ -174,6 +174,7 @@ export function App() {
   const [target, setTarget] = useState<Target>();
   const [output, setOutput] = useState<PaneOutput>();
   const [input, setInput] = useState("");
+  const [sendEnterAfterPaneText, setSendEnterAfterPaneText] = useState(true);
   const [navigationError, setNavigationError] = useState<string>();
   const [outputError, setOutputError] = useState<string>();
   const [agentsError, setAgentsError] = useState<string>();
@@ -569,28 +570,62 @@ export function App() {
     if (!target || input.length === 0) return;
     setIsSending(true);
     try {
-      const response =
-        target.kind === "agent"
-          ? await api.api.agents.prompt.$post(
-              {
-                json: { paneId: target.paneId, prompt: input },
-              },
-              { init: { signal: AbortSignal.timeout(60000) } },
-            )
-          : await api.api.panes[":paneId"].text.$post(
-              {
-                param: { paneId: target.paneId },
-                json: { text: input },
-              },
-              { init: { signal: AbortSignal.timeout(15000) } },
-            );
-      if (!response.ok) {
-        const message = await messageFor(response, "送信できません。");
-        if (response.status === 503 || response.status === 504) {
-          setConnectionStatus("unavailable");
-          throw new RequestOutcomeUnknownError(message);
+      if (target.kind === "agent") {
+        const response = await api.api.agents.prompt.$post(
+          {
+            json: { paneId: target.paneId, prompt: input },
+          },
+          { init: { signal: AbortSignal.timeout(60000) } },
+        );
+        if (!response.ok) {
+          const message = await messageFor(response, "送信できません。");
+          if (response.status === 503 || response.status === 504) {
+            setConnectionStatus("unavailable");
+            throw new RequestOutcomeUnknownError(message);
+          }
+          throw new Error(message);
         }
-        throw new Error(message);
+      } else {
+        const response = await api.api.panes[":paneId"].text.$post(
+          {
+            param: { paneId: target.paneId },
+            json: { text: input },
+          },
+          { init: { signal: AbortSignal.timeout(15000) } },
+        );
+        if (!response.ok) {
+          const message = await messageFor(response, "送信できません。");
+          if (response.status === 503 || response.status === 504) {
+            setConnectionStatus("unavailable");
+            throw new RequestOutcomeUnknownError(message);
+          }
+          throw new Error(message);
+        }
+
+        // Clear accepted text before sending Enter so a partial failure cannot
+        // cause an accidental duplicate when the user retries.
+        setInput("");
+        if (sendEnterAfterPaneText) {
+          try {
+            await sendPaneKey(target.paneId, "enter");
+          } catch (cause) {
+            if (
+              cause instanceof RequestOutcomeUnknownError ||
+              isConnectionFailure(cause)
+            ) {
+              setConnectionStatus("unavailable");
+              setActionError(
+                "本文は送信済みです。Enterの送信結果を確認できないため、出力を確認してください。",
+              );
+            } else {
+              setActionError(
+                "本文は送信済みですが、Enterを送信できませんでした。",
+              );
+            }
+            void refreshOutput();
+            return;
+          }
+        }
       }
       setInput("");
       setActionError(undefined);
@@ -613,6 +648,24 @@ export function App() {
       );
     } finally {
       setIsSending(false);
+    }
+  }
+
+  async function sendPaneKey(paneId: string, key: SpecialKey) {
+    const response = await api.api.panes[":paneId"].key.$post(
+      { param: { paneId }, json: { key } },
+      { init: { signal: AbortSignal.timeout(15000) } },
+    );
+    if (!response.ok) {
+      const message = await messageFor(response, "キーを送信できません。");
+      if (
+        response.status === 502 ||
+        response.status === 503 ||
+        response.status === 504
+      ) {
+        throw new RequestOutcomeUnknownError(message);
+      }
+      throw new Error(message);
     }
   }
 
@@ -869,7 +922,9 @@ export function App() {
             : "未選択"}
         </p>
         <label htmlFor="command">
-          {target?.kind === "agent" ? "Agent へのプロンプト" : "テキストを送信"}
+          {target?.kind === "agent"
+            ? "Agent に送るプロンプト"
+            : "ペインに送るテキスト"}
         </label>
         <textarea
           disabled={!target || isSending}
@@ -880,13 +935,32 @@ export function App() {
           }
           value={input}
         />
+        {target?.kind === "pane" && (
+          <label className="send-enter-option">
+            <input
+              checked={sendEnterAfterPaneText}
+              disabled={isSending}
+              onChange={(event) =>
+                setSendEnterAfterPaneText(event.target.checked)
+              }
+              type="checkbox"
+            />
+            送信後に Enter を送る
+          </label>
+        )}
         <button
           className="send-button"
           disabled={!target || input.length === 0 || isSending}
           onClick={() => void sendText()}
           type="button"
         >
-          {isSending ? "送信中…" : "送信"}
+          {isSending
+            ? "送信中…"
+            : target?.kind === "agent"
+              ? "プロンプトを送信"
+              : sendEnterAfterPaneText
+                ? "テキストを送信して Enter"
+                : "テキストを送信"}
         </button>
         <div className="key-grid" aria-label="特殊キー">
           {specialKeys.map(({ key, label }) => (
