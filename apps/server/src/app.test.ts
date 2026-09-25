@@ -92,6 +92,14 @@ test("入力を検証して adapter に渡す", async () => {
   assert.equal(response.status, 200);
   assert.deepEqual(sent, { paneId: "p1", key: "ctrlC" });
 
+  const optionArrowUp = await app.request("/api/panes/p1/key", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ key: "optionArrowUp" }),
+  });
+  assert.equal(optionArrowUp.status, 200);
+  assert.deepEqual(sent, { paneId: "p1", key: "optionArrowUp" });
+
   const invalid = await app.request("/api/panes/p1/key", {
     method: "POST",
     headers: { "content-type": "application/json" },

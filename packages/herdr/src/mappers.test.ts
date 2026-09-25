@@ -42,6 +42,7 @@ async function withSocketPath<T>(
 
 function requestPayload(chunk: Buffer): {
   id: string;
+  method: string;
   params: Record<string, unknown>;
 } {
   const request: unknown = JSON.parse(chunk.toString("utf8"));
@@ -49,8 +50,13 @@ function requestPayload(chunk: Buffer): {
   assert.notEqual(request, null);
   assert.equal(Array.isArray(request), false);
   assert.equal(typeof (request as { id?: unknown }).id, "string");
+  assert.equal(typeof (request as { method?: unknown }).method, "string");
   assert.equal(typeof (request as { params?: unknown }).params, "object");
-  return request as { id: string; params: Record<string, unknown> };
+  return request as {
+    id: string;
+    method: string;
+    params: Record<string, unknown>;
+  };
 }
 
 test("未知の Agent 状態は unknown に正規化する", () => {
@@ -67,7 +73,35 @@ test("特殊キーを Herdr の論理キーへ変換する", () => {
     arrowDown: "down",
     arrowLeft: "left",
     arrowRight: "right",
+    optionArrowUp: "alt+up",
   });
+});
+
+test("Option+上矢印は Herdr へ alt+up として送る", async () => {
+  const directory = await mkdtemp(`${tmpdir()}/herdr-adapter-test-`);
+  const socketPath = `${directory}/herdr.sock`;
+  const server = createServer((socket) => {
+    socket.once("data", (chunk: Buffer) => {
+      const request = requestPayload(chunk);
+      assert.equal(request.method, "pane.send_keys");
+      assert.deepEqual(request.params, { pane_id: "p1", keys: ["alt+up"] });
+      socket.end(
+        `${JSON.stringify({ id: request.id, result: { type: "ok" } })}\n`,
+      );
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+  try {
+    await withSocketPath(socketPath, () =>
+      createHerdrClient().sendKey("p1", "optionArrowUp"),
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("Agent の optional フィールドを安定モデルへ変換する", () => {

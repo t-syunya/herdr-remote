@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { connect } from "node:net";
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import {
   HerdrAccessDeniedError,
   HerdrUnavailableError,
@@ -15,6 +15,9 @@ const maxResponseBytes = 4 * 1024 * 1024;
 export class SocketTransport {
   readonly socketPath: string;
   readonly requestTimeoutMs: number;
+  readonly relayHost?: string;
+  readonly relayPort?: number;
+  readonly relayToken?: string;
 
   constructor(
     options: { socketPath?: string; requestTimeoutMs?: number } = {},
@@ -23,6 +26,10 @@ export class SocketTransport {
       options.socketPath ??
       process.env.HERDR_SOCKET_PATH ??
       `${homedir()}/.config/herdr/herdr.sock`;
+    this.relayHost = process.env.HERDR_RELAY_HOST;
+    const relayPort = process.env.HERDR_RELAY_PORT;
+    this.relayPort = relayPort ? Number(relayPort) : undefined;
+    this.relayToken = process.env.HERDR_RELAY_TOKEN;
     this.requestTimeoutMs = options.requestTimeoutMs ?? defaultTimeoutMs;
   }
 
@@ -32,10 +39,19 @@ export class SocketTransport {
   ): Promise<RawResponse> {
     const request: RawRequest = { id: randomUUID(), method, params };
     return new Promise((resolve, reject) => {
-      const socket = connect(this.socketPath);
+      const socket =
+        this.relayHost && this.relayPort && this.relayToken
+          ? connect(this.relayPort, this.relayHost)
+          : connect(this.socketPath);
+      const usesRelay = Boolean(
+        this.relayHost && this.relayPort && this.relayToken,
+      );
+      const payload = `${JSON.stringify(request)}\n`;
       const chunks: Buffer[] = [];
       let receivedBytes = 0;
       let settled = false;
+      let relayChallenge = Buffer.alloc(0);
+      let awaitingRelayChallenge = usesRelay;
       const finish = (callback: () => void) => {
         if (!settled) {
           settled = true;
@@ -56,8 +72,10 @@ export class SocketTransport {
         this.requestTimeoutMs,
       );
       socket.setTimeout(this.requestTimeoutMs);
-      socket.on("connect", () => socket.write(`${JSON.stringify(request)}\n`));
-      socket.on("data", (chunk: Buffer) => {
+      socket.on("connect", () => {
+        if (!usesRelay) socket.write(payload);
+      });
+      const collectResponse = (chunk: Buffer) => {
         receivedBytes += chunk.length;
         if (receivedBytes > maxResponseBytes) {
           finish(() =>
@@ -70,6 +88,37 @@ export class SocketTransport {
           return;
         }
         chunks.push(chunk);
+      };
+      socket.on("data", (chunk: Buffer) => {
+        if (awaitingRelayChallenge) {
+          relayChallenge = Buffer.concat([relayChallenge, chunk]);
+          const newline = relayChallenge.indexOf(10);
+          if (newline < 0) {
+            if (relayChallenge.length > 128) {
+              finish(() =>
+                reject(new InvalidHerdrResponseError("中継の応答が不正です。")),
+              );
+            }
+            return;
+          }
+          awaitingRelayChallenge = false;
+
+          const challenge = relayChallenge
+            .subarray(0, newline)
+            .toString("utf8");
+          if (!/^[a-f0-9]{64}$/.test(challenge) || !this.relayToken) {
+            finish(() =>
+              reject(new InvalidHerdrResponseError("中継の応答が不正です。")),
+            );
+            return;
+          }
+          const pendingResponse = relayChallenge.subarray(newline + 1);
+          socket.write(
+            `${createHmac("sha256", this.relayToken).update(challenge).digest("hex")}\n${payload}`,
+          );
+          if (pendingResponse.length) collectResponse(pendingResponse);
+          return;
+        } else collectResponse(chunk);
       });
       socket.on("timeout", () =>
         finish(() =>

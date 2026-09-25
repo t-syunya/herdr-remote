@@ -47,7 +47,8 @@ export type SpecialKey =
   | "arrowUp"
   | "arrowDown"
   | "arrowLeft"
-  | "arrowRight";
+  | "arrowRight"
+  | "optionArrowUp";
 export type HerdrClientOptions = {
   outputLines?: number;
 };

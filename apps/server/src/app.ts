@@ -23,6 +23,7 @@ const specialKeys = [
   "arrowDown",
   "arrowLeft",
   "arrowRight",
+  "optionArrowUp",
 ] as const satisfies readonly SpecialKey[];
 
 type ApiError = {

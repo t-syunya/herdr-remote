@@ -8,4 +8,5 @@ export const specialKeyNames: Record<SpecialKey, string> = {
   arrowDown: "down",
   arrowLeft: "left",
   arrowRight: "right",
+  optionArrowUp: "alt+up",
 };

@@ -57,7 +57,8 @@ type SpecialKey =
   | "arrowUp"
   | "arrowDown"
   | "arrowLeft"
-  | "arrowRight";
+  | "arrowRight"
+  | "optionArrowUp";
 
 class HerdrUnavailableRequestError extends Error {}
 class TargetNotFoundRequestError extends Error {}
@@ -146,6 +147,7 @@ const specialKeys: ReadonlyArray<{ key: SpecialKey; label: string }> = [
   { key: "arrowDown", label: "↓" },
   { key: "arrowLeft", label: "←" },
   { key: "arrowRight", label: "→" },
+  { key: "optionArrowUp", label: "⌥↑" },
 ];
 
 async function messageFor(response: Response, fallback: string) {
@@ -889,6 +891,11 @@ export function App() {
         <div className="key-grid" aria-label="特殊キー">
           {specialKeys.map(({ key, label }) => (
             <button
+              aria-label={
+                key === "optionArrowUp"
+                  ? "Option + 上矢印（質問に回答）"
+                  : label
+              }
               disabled={!target || isSending}
               key={key}
               onClick={() => void sendKey(key)}
@@ -898,6 +905,9 @@ export function App() {
             </button>
           ))}
         </div>
+        <p className="hint key-hint">
+          選択式の質問: ⌥↑で回答を開く → ↑/↓で選ぶ → Enterで確定
+        </p>
       </section>
     </main>
   );

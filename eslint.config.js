@@ -16,7 +16,11 @@ export default tseslint.config(
     },
   },
   {
-    files: ["apps/server/**/*.ts"],
+    files: [
+      "apps/server/**/*.ts",
+      "packages/herdr/src/transport/relay.mjs",
+      "scripts/tailscale-web-proxy.mjs",
+    ],
     languageOptions: {
       globals: globals.node,
     },
