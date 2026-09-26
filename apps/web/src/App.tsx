@@ -195,6 +195,19 @@ export function App() {
   const outputElement = useRef<HTMLPreElement>(null);
   const wasAtOutputEnd = useRef(true);
   const outputAnchor = useRef<OutputAnchor | undefined>(undefined);
+  const connectionStatusRef = useRef<ConnectionStatus>("checking");
+
+  const markConnected = useCallback(() => {
+    const recovered = connectionStatusRef.current === "unavailable";
+    connectionStatusRef.current = "connected";
+    setConnectionStatus("connected");
+    return recovered;
+  }, []);
+
+  const markUnavailable = useCallback(() => {
+    connectionStatusRef.current = "unavailable";
+    setConnectionStatus("unavailable");
+  }, []);
 
   const clearTarget = useCallback(() => {
     ++outputRequestId.current;
@@ -294,16 +307,16 @@ export function App() {
       workspaceIdRef.current = nextWorkspaceId;
       setTabId(nextTabId);
       tabIdRef.current = nextTabId;
-      setConnectionStatus("connected");
+      markConnected();
       setNavigationError(undefined);
     } catch (cause) {
       if (requestId !== navigationRequestId.current) return;
-      setConnectionStatus("unavailable");
+      markUnavailable();
       setNavigationError(errorMessage(cause, "接続を確認できません。"));
     } finally {
       if (requestId === navigationRequestId.current) setIsRefreshing(false);
     }
-  }, [clearTarget]);
+  }, [clearTarget, markConnected, markUnavailable]);
 
   const refreshOutput = useCallback(async () => {
     if (!target) {
@@ -348,19 +361,19 @@ export function App() {
       setLastOutputAt(Date.now());
       setIsOutputStale(false);
       setOutputError(undefined);
-      setConnectionStatus("connected");
+      if (markConnected()) void refreshNavigation();
     } catch (cause) {
       if (requestId !== outputRequestId.current) return;
       if (
         cause instanceof HerdrUnavailableRequestError ||
         isConnectionFailure(cause)
       ) {
-        setConnectionStatus("unavailable");
+        markUnavailable();
       }
       if (cause instanceof TargetNotFoundRequestError) clearTarget();
       setOutputError(errorMessage(cause, "出力を取得できません。"));
     }
-  }, [target]);
+  }, [clearTarget, markConnected, markUnavailable, refreshNavigation, target]);
 
   useEffect(() => {
     if (!lastOutputAt) return;
@@ -425,18 +438,18 @@ export function App() {
         clearTarget();
       }
       setAgentsError(undefined);
-      setConnectionStatus("connected");
+      if (markConnected()) void refreshNavigation();
     } catch (cause) {
       if (requestId !== agentsRequestId.current) return;
       if (
         cause instanceof HerdrUnavailableRequestError ||
         isConnectionFailure(cause)
       ) {
-        setConnectionStatus("unavailable");
+        markUnavailable();
       }
       setAgentsError(errorMessage(cause, "Agent を取得できません。"));
     }
-  }, [clearTarget]);
+  }, [clearTarget, markConnected, markUnavailable, refreshNavigation]);
 
   const refreshAll = useCallback(() => {
     void refreshNavigation();
@@ -484,10 +497,15 @@ export function App() {
     const refreshWhenActive = () => {
       if (document.visibilityState === "visible") refreshAll();
     };
+    const refreshWhenRestored = (event: PageTransitionEvent) => {
+      if (event.persisted) refreshAll();
+    };
     window.addEventListener("online", refreshAll);
+    window.addEventListener("pageshow", refreshWhenRestored);
     document.addEventListener("visibilitychange", refreshWhenActive);
     return () => {
       window.removeEventListener("online", refreshAll);
+      window.removeEventListener("pageshow", refreshWhenRestored);
       document.removeEventListener("visibilitychange", refreshWhenActive);
     };
   }, [refreshAll]);
@@ -509,7 +527,7 @@ export function App() {
       if (requestId !== navigationRequestId.current) return;
       if (!response.ok) {
         if (response.status === 503 || response.status === 504)
-          setConnectionStatus("unavailable");
+          markUnavailable();
         throw new Error(await messageFor(response, "タブを取得できません。"));
       }
       const nextTabs = ((await response.json()) as { tabs: Tab[] }).tabs;
@@ -522,7 +540,7 @@ export function App() {
         if (requestId !== navigationRequestId.current) return;
         if (!panesResponse.ok) {
           if (panesResponse.status === 503 || panesResponse.status === 504)
-            setConnectionStatus("unavailable");
+            markUnavailable();
           throw new Error(
             await messageFor(panesResponse, "ペインを取得できません。"),
           );
@@ -537,7 +555,7 @@ export function App() {
       setNavigationError(undefined);
     } catch (cause) {
       if (requestId !== navigationRequestId.current) return;
-      if (isConnectionFailure(cause)) setConnectionStatus("unavailable");
+      if (isConnectionFailure(cause)) markUnavailable();
       setNavigationError(errorMessage(cause, "タブを取得できません。"));
     }
   }
@@ -556,7 +574,7 @@ export function App() {
       if (requestId !== navigationRequestId.current) return;
       if (!response.ok) {
         if (response.status === 503 || response.status === 504)
-          setConnectionStatus("unavailable");
+          markUnavailable();
         throw new Error(await messageFor(response, "ペインを取得できません。"));
       }
       const nextPanes = (await response.json()) as { panes: Pane[] };
@@ -565,7 +583,7 @@ export function App() {
       setNavigationError(undefined);
     } catch (cause) {
       if (requestId !== navigationRequestId.current) return;
-      if (isConnectionFailure(cause)) setConnectionStatus("unavailable");
+      if (isConnectionFailure(cause)) markUnavailable();
       setNavigationError(errorMessage(cause, "ペインを取得できません。"));
     }
   }
@@ -600,7 +618,7 @@ export function App() {
         if (!response.ok) {
           const message = await messageFor(response, "送信できません。");
           if (response.status === 503 || response.status === 504) {
-            setConnectionStatus("unavailable");
+            markUnavailable();
             throw new RequestOutcomeUnknownError(message);
           }
           throw new Error(message);
@@ -616,7 +634,7 @@ export function App() {
         if (!response.ok) {
           const message = await messageFor(response, "送信できません。");
           if (response.status === 503 || response.status === 504) {
-            setConnectionStatus("unavailable");
+            markUnavailable();
             throw new RequestOutcomeUnknownError(message);
           }
           throw new Error(message);
@@ -633,7 +651,7 @@ export function App() {
               cause instanceof RequestOutcomeUnknownError ||
               isConnectionFailure(cause)
             ) {
-              setConnectionStatus("unavailable");
+              markUnavailable();
               setActionError(
                 "本文は送信済みです。Enterの送信結果を確認できないため、出力を確認してください。",
               );
@@ -656,7 +674,7 @@ export function App() {
         cause instanceof RequestOutcomeUnknownError ||
         isConnectionFailure(cause)
       ) {
-        setConnectionStatus("unavailable");
+        markUnavailable();
       }
       setActionError(
         cause instanceof RequestOutcomeUnknownError ||
@@ -703,7 +721,7 @@ export function App() {
       if (!response.ok) {
         const message = await messageFor(response, "キーを送信できません。");
         if (response.status === 503 || response.status === 504) {
-          setConnectionStatus("unavailable");
+          markUnavailable();
           throw new RequestOutcomeUnknownError(message);
         }
         throw new Error(message);
@@ -716,7 +734,7 @@ export function App() {
         cause instanceof RequestOutcomeUnknownError ||
         isConnectionFailure(cause)
       ) {
-        setConnectionStatus("unavailable");
+        markUnavailable();
       }
       setActionError(
         cause instanceof RequestOutcomeUnknownError ||
