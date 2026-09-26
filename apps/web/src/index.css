@@ -28,7 +28,10 @@ button:disabled {
   gap: 1rem;
   max-width: 42rem;
   margin: 0 auto;
-  padding: 1rem;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: calc(1rem + env(safe-area-inset-top)) 1rem
+    calc(1rem + env(safe-area-inset-bottom));
 }
 .app-header,
 .section-heading,
@@ -191,7 +194,7 @@ textarea {
   min-height: 13rem;
 }
 pre {
-  max-height: 48vh;
+  max-height: min(48vh, calc(var(--visual-viewport-height, 100vh) * 0.4));
   overflow: auto;
   margin: 0.75rem 0 0;
   border-radius: 0.5rem;
@@ -217,13 +220,20 @@ pre {
   margin-top: 0.65rem;
 }
 .controls {
-  position: sticky;
-  bottom: 0;
-  box-shadow: 0 -0.8rem 1.5rem #10151eb3;
+  scroll-margin-block-end: calc(1rem + env(safe-area-inset-bottom));
+  padding-bottom: calc(0.9rem + env(safe-area-inset-bottom));
 }
 textarea {
-  min-height: 5rem;
+  min-height: 7rem;
+  max-height: min(35vh, calc(var(--visual-viewport-height, 100vh) * 0.3));
+  overflow-y: auto;
   resize: vertical;
+  font-size: 16px;
+  line-height: 1.5;
+  scroll-margin-block-end: calc(1rem + env(safe-area-inset-bottom));
+}
+.composer-hint {
+  margin-top: 0.45rem;
 }
 .send-button {
   width: 100%;
@@ -262,7 +272,13 @@ textarea {
 }
 @media (min-width: 42rem) {
   .app-shell {
-    padding: 1.5rem;
+    padding: calc(1.5rem + env(safe-area-inset-top)) 1.5rem
+      calc(1.5rem + env(safe-area-inset-bottom));
+  }
+  .controls {
+    position: sticky;
+    bottom: 0;
+    box-shadow: 0 -0.8rem 1.5rem #10151eb3;
   }
   .key-grid {
     grid-template-columns: repeat(7, 1fr);
