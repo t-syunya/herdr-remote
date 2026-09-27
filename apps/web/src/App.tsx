@@ -196,6 +196,8 @@ export function App() {
   const wasAtOutputEnd = useRef(true);
   const outputAnchor = useRef<OutputAnchor | undefined>(undefined);
   const connectionStatusRef = useRef<ConnectionStatus>("checking");
+  const navigationRecoveryPendingRef = useRef(false);
+  const navigationRecoveryInFlightRef = useRef(false);
 
   const markConnected = useCallback(() => {
     const recovered = connectionStatusRef.current === "unavailable";
@@ -282,6 +284,7 @@ export function App() {
         );
       const nextAgents = (await agentsResponse.json()) as { agents: Agent[] };
       if (requestId !== navigationRequestId.current) return;
+      navigationRecoveryPendingRef.current = false;
       setWorkspaces(nextWorkspaces);
       setTabs(nextTabs);
       setPanes(nextPanes);
@@ -317,6 +320,15 @@ export function App() {
       if (requestId === navigationRequestId.current) setIsRefreshing(false);
     }
   }, [clearTarget, markConnected, markUnavailable]);
+
+  const beginNavigationRecovery = useCallback(() => {
+    navigationRecoveryPendingRef.current = true;
+    if (navigationRecoveryInFlightRef.current) return;
+    navigationRecoveryInFlightRef.current = true;
+    void refreshNavigation().finally(() => {
+      navigationRecoveryInFlightRef.current = false;
+    });
+  }, [refreshNavigation]);
 
   const refreshOutput = useCallback(async () => {
     if (!target) {
@@ -361,7 +373,7 @@ export function App() {
       setLastOutputAt(Date.now());
       setIsOutputStale(false);
       setOutputError(undefined);
-      if (markConnected()) void refreshNavigation();
+      if (markConnected()) beginNavigationRecovery();
     } catch (cause) {
       if (requestId !== outputRequestId.current) return;
       if (
@@ -373,7 +385,13 @@ export function App() {
       if (cause instanceof TargetNotFoundRequestError) clearTarget();
       setOutputError(errorMessage(cause, "出力を取得できません。"));
     }
-  }, [clearTarget, markConnected, markUnavailable, refreshNavigation, target]);
+  }, [
+    beginNavigationRecovery,
+    clearTarget,
+    markConnected,
+    markUnavailable,
+    target,
+  ]);
 
   useEffect(() => {
     if (!lastOutputAt) return;
@@ -438,7 +456,7 @@ export function App() {
         clearTarget();
       }
       setAgentsError(undefined);
-      if (markConnected()) void refreshNavigation();
+      if (markConnected()) beginNavigationRecovery();
     } catch (cause) {
       if (requestId !== agentsRequestId.current) return;
       if (
@@ -449,7 +467,7 @@ export function App() {
       }
       setAgentsError(errorMessage(cause, "Agent を取得できません。"));
     }
-  }, [clearTarget, markConnected, markUnavailable, refreshNavigation]);
+  }, [beginNavigationRecovery, clearTarget, markConnected, markUnavailable]);
 
   const refreshAll = useCallback(() => {
     void refreshNavigation();
@@ -487,12 +505,13 @@ export function App() {
     const interval = window.setInterval(() => {
       if (isPolling.current) return;
       isPolling.current = true;
+      if (navigationRecoveryPendingRef.current) beginNavigationRecovery();
       void Promise.all([refreshOutput(), refreshAgents()]).finally(() => {
         isPolling.current = false;
       });
     }, 4000);
     return () => window.clearInterval(interval);
-  }, [refreshAgents, refreshOutput]);
+  }, [beginNavigationRecovery, refreshAgents, refreshOutput]);
   useEffect(() => {
     const refreshWhenActive = () => {
       if (document.visibilityState === "visible") refreshAll();
