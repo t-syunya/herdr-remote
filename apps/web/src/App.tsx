@@ -226,102 +226,106 @@ export function App() {
     outputAnchor.current = undefined;
   }, []);
 
-  const refreshNavigation = useCallback(async () => {
-    const requestId = ++navigationRequestId.current;
-    setIsRefreshing(true);
-    try {
-      const statusResponse = await api.api.status.$get();
-      if (!statusResponse.ok)
-        throw new Error(
-          await messageFor(statusResponse, "Herdr に接続できません。"),
-        );
-      const workspacesResponse = await api.api.workspaces.$get();
-      if (!workspacesResponse.ok)
-        throw new Error(
-          await messageFor(
-            workspacesResponse,
-            "ワークスペースを取得できません。",
-          ),
-        );
-      const nextWorkspaces = (
-        (await workspacesResponse.json()) as { workspaces: Workspace[] }
-      ).workspaces;
-      const nextWorkspaceId = nextWorkspaces.some(
-        (workspace) => workspace.id === workspaceIdRef.current,
-      )
-        ? workspaceIdRef.current
-        : nextWorkspaces[0]?.id;
-      let nextTabs: Tab[] = [];
-      let nextPanes: Pane[] = [];
-      let nextTabId: string | undefined;
-      if (nextWorkspaceId) {
-        const tabsResponse = await api.api.workspaces[":workspaceId"].tabs.$get(
-          { param: { workspaceId: nextWorkspaceId } },
-        );
-        if (!tabsResponse.ok)
+  const refreshNavigation = useCallback(
+    async (silent = false) => {
+      const requestId = ++navigationRequestId.current;
+      if (!silent) setIsRefreshing(true);
+      try {
+        const statusResponse = await api.api.status.$get();
+        if (!statusResponse.ok)
           throw new Error(
-            await messageFor(tabsResponse, "タブを取得できません。"),
+            await messageFor(statusResponse, "Herdr に接続できません。"),
           );
-        nextTabs = ((await tabsResponse.json()) as { tabs: Tab[] }).tabs;
-        nextTabId = nextTabs.some((tab) => tab.id === tabIdRef.current)
-          ? tabIdRef.current
-          : nextTabs[0]?.id;
-        if (nextTabId) {
-          const panesResponse = await api.api.tabs[":tabId"].panes.$get({
-            param: { tabId: nextTabId },
-          });
-          if (!panesResponse.ok)
+        const workspacesResponse = await api.api.workspaces.$get();
+        if (!workspacesResponse.ok)
+          throw new Error(
+            await messageFor(
+              workspacesResponse,
+              "ワークスペースを取得できません。",
+            ),
+          );
+        const nextWorkspaces = (
+          (await workspacesResponse.json()) as { workspaces: Workspace[] }
+        ).workspaces;
+        const nextWorkspaceId = nextWorkspaces.some(
+          (workspace) => workspace.id === workspaceIdRef.current,
+        )
+          ? workspaceIdRef.current
+          : nextWorkspaces[0]?.id;
+        let nextTabs: Tab[] = [];
+        let nextPanes: Pane[] = [];
+        let nextTabId: string | undefined;
+        if (nextWorkspaceId) {
+          const tabsResponse = await api.api.workspaces[
+            ":workspaceId"
+          ].tabs.$get({ param: { workspaceId: nextWorkspaceId } });
+          if (!tabsResponse.ok)
             throw new Error(
-              await messageFor(panesResponse, "ペインを取得できません。"),
+              await messageFor(tabsResponse, "タブを取得できません。"),
             );
-          nextPanes = ((await panesResponse.json()) as { panes: Pane[] }).panes;
+          nextTabs = ((await tabsResponse.json()) as { tabs: Tab[] }).tabs;
+          nextTabId = nextTabs.some((tab) => tab.id === tabIdRef.current)
+            ? tabIdRef.current
+            : nextTabs[0]?.id;
+          if (nextTabId) {
+            const panesResponse = await api.api.tabs[":tabId"].panes.$get({
+              param: { tabId: nextTabId },
+            });
+            if (!panesResponse.ok)
+              throw new Error(
+                await messageFor(panesResponse, "ペインを取得できません。"),
+              );
+            nextPanes = ((await panesResponse.json()) as { panes: Pane[] })
+              .panes;
+          }
         }
-      }
-      const agentRequestId = ++agentsRequestId.current;
-      const agentsResponse = await api.api.agents.$get();
-      if (!agentsResponse.ok)
-        throw new Error(
-          await messageFor(agentsResponse, "Agent を取得できません。"),
-        );
-      const nextAgents = (await agentsResponse.json()) as { agents: Agent[] };
-      if (requestId !== navigationRequestId.current) return false;
-      setWorkspaces(nextWorkspaces);
-      setTabs(nextTabs);
-      setPanes(nextPanes);
-      const currentTarget = targetRef.current;
-      if (agentRequestId === agentsRequestId.current) {
-        setAgents(nextAgents.agents);
+        const agentRequestId = ++agentsRequestId.current;
+        const agentsResponse = await api.api.agents.$get();
+        if (!agentsResponse.ok)
+          throw new Error(
+            await messageFor(agentsResponse, "Agent を取得できません。"),
+          );
+        const nextAgents = (await agentsResponse.json()) as { agents: Agent[] };
+        if (requestId !== navigationRequestId.current) return false;
+        setWorkspaces(nextWorkspaces);
+        setTabs(nextTabs);
+        setPanes(nextPanes);
+        const currentTarget = targetRef.current;
+        if (agentRequestId === agentsRequestId.current) {
+          setAgents(nextAgents.agents);
+          if (
+            currentTarget?.kind === "agent" &&
+            !nextAgents.agents.some(
+              (agent) => agent.paneId === currentTarget.paneId,
+            )
+          ) {
+            clearTarget();
+          }
+        }
         if (
-          currentTarget?.kind === "agent" &&
-          !nextAgents.agents.some(
-            (agent) => agent.paneId === currentTarget.paneId,
-          )
+          currentTarget?.kind === "pane" &&
+          !nextPanes.some((pane) => pane.id === currentTarget.paneId)
         ) {
           clearTarget();
         }
+        setWorkspaceId(nextWorkspaceId);
+        workspaceIdRef.current = nextWorkspaceId;
+        setTabId(nextTabId);
+        tabIdRef.current = nextTabId;
+        markConnected();
+        setNavigationError(undefined);
+        return true;
+      } catch (cause) {
+        if (requestId !== navigationRequestId.current) return false;
+        markUnavailable();
+        setNavigationError(errorMessage(cause, "接続を確認できません。"));
+        return false;
+      } finally {
+        if (requestId === navigationRequestId.current) setIsRefreshing(false);
       }
-      if (
-        currentTarget?.kind === "pane" &&
-        !nextPanes.some((pane) => pane.id === currentTarget.paneId)
-      ) {
-        clearTarget();
-      }
-      setWorkspaceId(nextWorkspaceId);
-      workspaceIdRef.current = nextWorkspaceId;
-      setTabId(nextTabId);
-      tabIdRef.current = nextTabId;
-      markConnected();
-      setNavigationError(undefined);
-      return true;
-    } catch (cause) {
-      if (requestId !== navigationRequestId.current) return false;
-      markUnavailable();
-      setNavigationError(errorMessage(cause, "接続を確認できません。"));
-      return false;
-    } finally {
-      if (requestId === navigationRequestId.current) setIsRefreshing(false);
-    }
-  }, [clearTarget, markConnected, markUnavailable]);
+    },
+    [clearTarget, markConnected, markUnavailable],
+  );
 
   const beginNavigationRecovery = useCallback(() => {
     const generation = ++navigationRecoveryRequestedRef.current;
@@ -523,6 +527,13 @@ export function App() {
     return () => window.clearInterval(interval);
   }, [beginNavigationRecovery, refreshAgents, refreshOutput]);
   useEffect(() => {
+    const interval = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void refreshNavigation(true);
+    }, 30000);
+    return () => window.clearInterval(interval);
+  }, [refreshNavigation]);
+  useEffect(() => {
     const refreshWhenActive = () => {
       if (document.visibilityState === "visible") refreshAll();
     };
@@ -582,6 +593,7 @@ export function App() {
       setTabId(nextTabId);
       tabIdRef.current = nextTabId;
       setNavigationError(undefined);
+      if (markConnected()) beginNavigationRecovery();
     } catch (cause) {
       if (requestId !== navigationRequestId.current) return;
       if (isConnectionFailure(cause)) markUnavailable();
@@ -610,6 +622,7 @@ export function App() {
       if (requestId !== navigationRequestId.current) return;
       setPanes(nextPanes.panes);
       setNavigationError(undefined);
+      if (markConnected()) beginNavigationRecovery();
     } catch (cause) {
       if (requestId !== navigationRequestId.current) return;
       if (isConnectionFailure(cause)) markUnavailable();
@@ -696,6 +709,7 @@ export function App() {
       }
       setInput("");
       setActionError(undefined);
+      if (markConnected()) beginNavigationRecovery();
       void refreshOutput();
     } catch (cause) {
       if (
@@ -756,6 +770,7 @@ export function App() {
         throw new Error(message);
       }
       setActionError(undefined);
+      if (markConnected()) beginNavigationRecovery();
       void refreshOutput();
     } catch (cause) {
       if (
