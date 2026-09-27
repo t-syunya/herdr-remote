@@ -196,7 +196,8 @@ export function App() {
   const wasAtOutputEnd = useRef(true);
   const outputAnchor = useRef<OutputAnchor | undefined>(undefined);
   const connectionStatusRef = useRef<ConnectionStatus>("checking");
-  const navigationRecoveryPendingRef = useRef(false);
+  const navigationRecoveryRequestedRef = useRef(0);
+  const navigationRecoverySatisfiedRef = useRef(0);
   const navigationRecoveryInFlightRef = useRef(false);
 
   const markConnected = useCallback(() => {
@@ -283,8 +284,7 @@ export function App() {
           await messageFor(agentsResponse, "Agent を取得できません。"),
         );
       const nextAgents = (await agentsResponse.json()) as { agents: Agent[] };
-      if (requestId !== navigationRequestId.current) return;
-      navigationRecoveryPendingRef.current = false;
+      if (requestId !== navigationRequestId.current) return false;
       setWorkspaces(nextWorkspaces);
       setTabs(nextTabs);
       setPanes(nextPanes);
@@ -312,22 +312,28 @@ export function App() {
       tabIdRef.current = nextTabId;
       markConnected();
       setNavigationError(undefined);
+      return true;
     } catch (cause) {
-      if (requestId !== navigationRequestId.current) return;
+      if (requestId !== navigationRequestId.current) return false;
       markUnavailable();
       setNavigationError(errorMessage(cause, "接続を確認できません。"));
+      return false;
     } finally {
       if (requestId === navigationRequestId.current) setIsRefreshing(false);
     }
   }, [clearTarget, markConnected, markUnavailable]);
 
   const beginNavigationRecovery = useCallback(() => {
-    navigationRecoveryPendingRef.current = true;
+    const generation = ++navigationRecoveryRequestedRef.current;
     if (navigationRecoveryInFlightRef.current) return;
     navigationRecoveryInFlightRef.current = true;
-    void refreshNavigation().finally(() => {
-      navigationRecoveryInFlightRef.current = false;
-    });
+    void refreshNavigation()
+      .then((applied) => {
+        if (applied) navigationRecoverySatisfiedRef.current = generation;
+      })
+      .finally(() => {
+        navigationRecoveryInFlightRef.current = false;
+      });
   }, [refreshNavigation]);
 
   const refreshOutput = useCallback(async () => {
@@ -505,7 +511,11 @@ export function App() {
     const interval = window.setInterval(() => {
       if (isPolling.current) return;
       isPolling.current = true;
-      if (navigationRecoveryPendingRef.current) beginNavigationRecovery();
+      if (
+        navigationRecoveryRequestedRef.current >
+        navigationRecoverySatisfiedRef.current
+      )
+        beginNavigationRecovery();
       void Promise.all([refreshOutput(), refreshAgents()]).finally(() => {
         isPolling.current = false;
       });
