@@ -195,6 +195,22 @@ export function App() {
   const outputElement = useRef<HTMLPreElement>(null);
   const wasAtOutputEnd = useRef(true);
   const outputAnchor = useRef<OutputAnchor | undefined>(undefined);
+  const connectionStatusRef = useRef<ConnectionStatus>("checking");
+  const navigationRecoveryRequestedRef = useRef(0);
+  const navigationRecoverySatisfiedRef = useRef(0);
+  const backgroundNavigationInFlightRef = useRef(false);
+
+  const markConnected = useCallback(() => {
+    const recovered = connectionStatusRef.current === "unavailable";
+    connectionStatusRef.current = "connected";
+    setConnectionStatus("connected");
+    return recovered;
+  }, []);
+
+  const markUnavailable = useCallback(() => {
+    connectionStatusRef.current = "unavailable";
+    setConnectionStatus("unavailable");
+  }, []);
 
   const clearTarget = useCallback(() => {
     ++outputRequestId.current;
@@ -210,100 +226,125 @@ export function App() {
     outputAnchor.current = undefined;
   }, []);
 
-  const refreshNavigation = useCallback(async () => {
-    const requestId = ++navigationRequestId.current;
-    setIsRefreshing(true);
-    try {
-      const statusResponse = await api.api.status.$get();
-      if (!statusResponse.ok)
-        throw new Error(
-          await messageFor(statusResponse, "Herdr に接続できません。"),
-        );
-      const workspacesResponse = await api.api.workspaces.$get();
-      if (!workspacesResponse.ok)
-        throw new Error(
-          await messageFor(
-            workspacesResponse,
-            "ワークスペースを取得できません。",
-          ),
-        );
-      const nextWorkspaces = (
-        (await workspacesResponse.json()) as { workspaces: Workspace[] }
-      ).workspaces;
-      const nextWorkspaceId = nextWorkspaces.some(
-        (workspace) => workspace.id === workspaceIdRef.current,
-      )
-        ? workspaceIdRef.current
-        : nextWorkspaces[0]?.id;
-      let nextTabs: Tab[] = [];
-      let nextPanes: Pane[] = [];
-      let nextTabId: string | undefined;
-      if (nextWorkspaceId) {
-        const tabsResponse = await api.api.workspaces[":workspaceId"].tabs.$get(
-          { param: { workspaceId: nextWorkspaceId } },
-        );
-        if (!tabsResponse.ok)
+  const refreshNavigation = useCallback(
+    async (silent = false) => {
+      const requestId = ++navigationRequestId.current;
+      if (!silent) setIsRefreshing(true);
+      try {
+        const statusResponse = await api.api.status.$get();
+        if (!statusResponse.ok)
           throw new Error(
-            await messageFor(tabsResponse, "タブを取得できません。"),
+            await messageFor(statusResponse, "Herdr に接続できません。"),
           );
-        nextTabs = ((await tabsResponse.json()) as { tabs: Tab[] }).tabs;
-        nextTabId = nextTabs.some((tab) => tab.id === tabIdRef.current)
-          ? tabIdRef.current
-          : nextTabs[0]?.id;
-        if (nextTabId) {
-          const panesResponse = await api.api.tabs[":tabId"].panes.$get({
-            param: { tabId: nextTabId },
-          });
-          if (!panesResponse.ok)
+        const workspacesResponse = await api.api.workspaces.$get();
+        if (!workspacesResponse.ok)
+          throw new Error(
+            await messageFor(
+              workspacesResponse,
+              "ワークスペースを取得できません。",
+            ),
+          );
+        const nextWorkspaces = (
+          (await workspacesResponse.json()) as { workspaces: Workspace[] }
+        ).workspaces;
+        const nextWorkspaceId = nextWorkspaces.some(
+          (workspace) => workspace.id === workspaceIdRef.current,
+        )
+          ? workspaceIdRef.current
+          : nextWorkspaces[0]?.id;
+        let nextTabs: Tab[] = [];
+        let nextPanes: Pane[] = [];
+        let nextTabId: string | undefined;
+        if (nextWorkspaceId) {
+          const tabsResponse = await api.api.workspaces[
+            ":workspaceId"
+          ].tabs.$get({ param: { workspaceId: nextWorkspaceId } });
+          if (!tabsResponse.ok)
             throw new Error(
-              await messageFor(panesResponse, "ペインを取得できません。"),
+              await messageFor(tabsResponse, "タブを取得できません。"),
             );
-          nextPanes = ((await panesResponse.json()) as { panes: Pane[] }).panes;
+          nextTabs = ((await tabsResponse.json()) as { tabs: Tab[] }).tabs;
+          nextTabId = nextTabs.some((tab) => tab.id === tabIdRef.current)
+            ? tabIdRef.current
+            : nextTabs[0]?.id;
+          if (nextTabId) {
+            const panesResponse = await api.api.tabs[":tabId"].panes.$get({
+              param: { tabId: nextTabId },
+            });
+            if (!panesResponse.ok)
+              throw new Error(
+                await messageFor(panesResponse, "ペインを取得できません。"),
+              );
+            nextPanes = ((await panesResponse.json()) as { panes: Pane[] })
+              .panes;
+          }
         }
-      }
-      const agentRequestId = ++agentsRequestId.current;
-      const agentsResponse = await api.api.agents.$get();
-      if (!agentsResponse.ok)
-        throw new Error(
-          await messageFor(agentsResponse, "Agent を取得できません。"),
-        );
-      const nextAgents = (await agentsResponse.json()) as { agents: Agent[] };
-      if (requestId !== navigationRequestId.current) return;
-      setWorkspaces(nextWorkspaces);
-      setTabs(nextTabs);
-      setPanes(nextPanes);
-      const currentTarget = targetRef.current;
-      if (agentRequestId === agentsRequestId.current) {
-        setAgents(nextAgents.agents);
+        const agentRequestId = ++agentsRequestId.current;
+        const agentsResponse = await api.api.agents.$get();
+        if (!agentsResponse.ok)
+          throw new Error(
+            await messageFor(agentsResponse, "Agent を取得できません。"),
+          );
+        const nextAgents = (await agentsResponse.json()) as { agents: Agent[] };
+        if (requestId !== navigationRequestId.current) return false;
+        setWorkspaces(nextWorkspaces);
+        setTabs(nextTabs);
+        setPanes(nextPanes);
+        const currentTarget = targetRef.current;
+        if (agentRequestId === agentsRequestId.current) {
+          setAgents(nextAgents.agents);
+          if (
+            currentTarget?.kind === "agent" &&
+            !nextAgents.agents.some(
+              (agent) => agent.paneId === currentTarget.paneId,
+            )
+          ) {
+            clearTarget();
+          }
+        }
         if (
-          currentTarget?.kind === "agent" &&
-          !nextAgents.agents.some(
-            (agent) => agent.paneId === currentTarget.paneId,
-          )
+          currentTarget?.kind === "pane" &&
+          !nextPanes.some((pane) => pane.id === currentTarget.paneId)
         ) {
           clearTarget();
         }
+        setWorkspaceId(nextWorkspaceId);
+        workspaceIdRef.current = nextWorkspaceId;
+        setTabId(nextTabId);
+        tabIdRef.current = nextTabId;
+        markConnected();
+        setNavigationError(undefined);
+        return true;
+      } catch (cause) {
+        if (requestId !== navigationRequestId.current) return false;
+        markUnavailable();
+        setNavigationError(errorMessage(cause, "接続を確認できません。"));
+        return false;
+      } finally {
+        if (requestId === navigationRequestId.current) setIsRefreshing(false);
       }
-      if (
-        currentTarget?.kind === "pane" &&
-        !nextPanes.some((pane) => pane.id === currentTarget.paneId)
-      ) {
-        clearTarget();
-      }
-      setWorkspaceId(nextWorkspaceId);
-      workspaceIdRef.current = nextWorkspaceId;
-      setTabId(nextTabId);
-      tabIdRef.current = nextTabId;
-      setConnectionStatus("connected");
-      setNavigationError(undefined);
-    } catch (cause) {
-      if (requestId !== navigationRequestId.current) return;
-      setConnectionStatus("unavailable");
-      setNavigationError(errorMessage(cause, "接続を確認できません。"));
-    } finally {
-      if (requestId === navigationRequestId.current) setIsRefreshing(false);
-    }
-  }, [clearTarget]);
+    },
+    [clearTarget, markConnected, markUnavailable],
+  );
+
+  const launchNavigationRecovery = useCallback(() => {
+    if (backgroundNavigationInFlightRef.current) return;
+    const generation = navigationRecoveryRequestedRef.current;
+    if (generation <= navigationRecoverySatisfiedRef.current) return;
+    backgroundNavigationInFlightRef.current = true;
+    void refreshNavigation()
+      .then((applied) => {
+        if (applied) navigationRecoverySatisfiedRef.current = generation;
+      })
+      .finally(() => {
+        backgroundNavigationInFlightRef.current = false;
+      });
+  }, [refreshNavigation]);
+
+  const beginNavigationRecovery = useCallback(() => {
+    navigationRecoveryRequestedRef.current += 1;
+    launchNavigationRecovery();
+  }, [launchNavigationRecovery]);
 
   const refreshOutput = useCallback(async () => {
     if (!target) {
@@ -348,19 +389,25 @@ export function App() {
       setLastOutputAt(Date.now());
       setIsOutputStale(false);
       setOutputError(undefined);
-      setConnectionStatus("connected");
+      if (markConnected()) beginNavigationRecovery();
     } catch (cause) {
       if (requestId !== outputRequestId.current) return;
       if (
         cause instanceof HerdrUnavailableRequestError ||
         isConnectionFailure(cause)
       ) {
-        setConnectionStatus("unavailable");
+        markUnavailable();
       }
       if (cause instanceof TargetNotFoundRequestError) clearTarget();
       setOutputError(errorMessage(cause, "出力を取得できません。"));
     }
-  }, [target]);
+  }, [
+    beginNavigationRecovery,
+    clearTarget,
+    markConnected,
+    markUnavailable,
+    target,
+  ]);
 
   useEffect(() => {
     if (!lastOutputAt) return;
@@ -425,18 +472,18 @@ export function App() {
         clearTarget();
       }
       setAgentsError(undefined);
-      setConnectionStatus("connected");
+      if (markConnected()) beginNavigationRecovery();
     } catch (cause) {
       if (requestId !== agentsRequestId.current) return;
       if (
         cause instanceof HerdrUnavailableRequestError ||
         isConnectionFailure(cause)
       ) {
-        setConnectionStatus("unavailable");
+        markUnavailable();
       }
       setAgentsError(errorMessage(cause, "Agent を取得できません。"));
     }
-  }, [clearTarget]);
+  }, [beginNavigationRecovery, clearTarget, markConnected, markUnavailable]);
 
   const refreshAll = useCallback(() => {
     void refreshNavigation();
@@ -474,20 +521,41 @@ export function App() {
     const interval = window.setInterval(() => {
       if (isPolling.current) return;
       isPolling.current = true;
+      if (
+        navigationRecoveryRequestedRef.current >
+        navigationRecoverySatisfiedRef.current
+      )
+        launchNavigationRecovery();
       void Promise.all([refreshOutput(), refreshAgents()]).finally(() => {
         isPolling.current = false;
       });
     }, 4000);
     return () => window.clearInterval(interval);
-  }, [refreshAgents, refreshOutput]);
+  }, [launchNavigationRecovery, refreshAgents, refreshOutput]);
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      if (backgroundNavigationInFlightRef.current) return;
+      backgroundNavigationInFlightRef.current = true;
+      void refreshNavigation(true).finally(() => {
+        backgroundNavigationInFlightRef.current = false;
+      });
+    }, 30000);
+    return () => window.clearInterval(interval);
+  }, [refreshNavigation]);
   useEffect(() => {
     const refreshWhenActive = () => {
       if (document.visibilityState === "visible") refreshAll();
     };
+    const refreshWhenRestored = (event: PageTransitionEvent) => {
+      if (event.persisted) refreshAll();
+    };
     window.addEventListener("online", refreshAll);
+    window.addEventListener("pageshow", refreshWhenRestored);
     document.addEventListener("visibilitychange", refreshWhenActive);
     return () => {
       window.removeEventListener("online", refreshAll);
+      window.removeEventListener("pageshow", refreshWhenRestored);
       document.removeEventListener("visibilitychange", refreshWhenActive);
     };
   }, [refreshAll]);
@@ -509,7 +577,7 @@ export function App() {
       if (requestId !== navigationRequestId.current) return;
       if (!response.ok) {
         if (response.status === 503 || response.status === 504)
-          setConnectionStatus("unavailable");
+          markUnavailable();
         throw new Error(await messageFor(response, "タブを取得できません。"));
       }
       const nextTabs = ((await response.json()) as { tabs: Tab[] }).tabs;
@@ -522,7 +590,7 @@ export function App() {
         if (requestId !== navigationRequestId.current) return;
         if (!panesResponse.ok) {
           if (panesResponse.status === 503 || panesResponse.status === 504)
-            setConnectionStatus("unavailable");
+            markUnavailable();
           throw new Error(
             await messageFor(panesResponse, "ペインを取得できません。"),
           );
@@ -535,9 +603,10 @@ export function App() {
       setTabId(nextTabId);
       tabIdRef.current = nextTabId;
       setNavigationError(undefined);
+      if (markConnected()) beginNavigationRecovery();
     } catch (cause) {
       if (requestId !== navigationRequestId.current) return;
-      if (isConnectionFailure(cause)) setConnectionStatus("unavailable");
+      if (isConnectionFailure(cause)) markUnavailable();
       setNavigationError(errorMessage(cause, "タブを取得できません。"));
     }
   }
@@ -556,16 +625,17 @@ export function App() {
       if (requestId !== navigationRequestId.current) return;
       if (!response.ok) {
         if (response.status === 503 || response.status === 504)
-          setConnectionStatus("unavailable");
+          markUnavailable();
         throw new Error(await messageFor(response, "ペインを取得できません。"));
       }
       const nextPanes = (await response.json()) as { panes: Pane[] };
       if (requestId !== navigationRequestId.current) return;
       setPanes(nextPanes.panes);
       setNavigationError(undefined);
+      if (markConnected()) beginNavigationRecovery();
     } catch (cause) {
       if (requestId !== navigationRequestId.current) return;
-      if (isConnectionFailure(cause)) setConnectionStatus("unavailable");
+      if (isConnectionFailure(cause)) markUnavailable();
       setNavigationError(errorMessage(cause, "ペインを取得できません。"));
     }
   }
@@ -600,7 +670,7 @@ export function App() {
         if (!response.ok) {
           const message = await messageFor(response, "送信できません。");
           if (response.status === 503 || response.status === 504) {
-            setConnectionStatus("unavailable");
+            markUnavailable();
             throw new RequestOutcomeUnknownError(message);
           }
           throw new Error(message);
@@ -616,7 +686,7 @@ export function App() {
         if (!response.ok) {
           const message = await messageFor(response, "送信できません。");
           if (response.status === 503 || response.status === 504) {
-            setConnectionStatus("unavailable");
+            markUnavailable();
             throw new RequestOutcomeUnknownError(message);
           }
           throw new Error(message);
@@ -633,7 +703,7 @@ export function App() {
               cause instanceof RequestOutcomeUnknownError ||
               isConnectionFailure(cause)
             ) {
-              setConnectionStatus("unavailable");
+              markUnavailable();
               setActionError(
                 "本文は送信済みです。Enterの送信結果を確認できないため、出力を確認してください。",
               );
@@ -649,6 +719,7 @@ export function App() {
       }
       setInput("");
       setActionError(undefined);
+      if (markConnected()) beginNavigationRecovery();
       void refreshOutput();
     } catch (cause) {
       if (
@@ -656,7 +727,7 @@ export function App() {
         cause instanceof RequestOutcomeUnknownError ||
         isConnectionFailure(cause)
       ) {
-        setConnectionStatus("unavailable");
+        markUnavailable();
       }
       setActionError(
         cause instanceof RequestOutcomeUnknownError ||
@@ -703,12 +774,13 @@ export function App() {
       if (!response.ok) {
         const message = await messageFor(response, "キーを送信できません。");
         if (response.status === 503 || response.status === 504) {
-          setConnectionStatus("unavailable");
+          markUnavailable();
           throw new RequestOutcomeUnknownError(message);
         }
         throw new Error(message);
       }
       setActionError(undefined);
+      if (markConnected()) beginNavigationRecovery();
       void refreshOutput();
     } catch (cause) {
       if (
@@ -716,7 +788,7 @@ export function App() {
         cause instanceof RequestOutcomeUnknownError ||
         isConnectionFailure(cause)
       ) {
-        setConnectionStatus("unavailable");
+        markUnavailable();
       }
       setActionError(
         cause instanceof RequestOutcomeUnknownError ||
