@@ -198,7 +198,7 @@ export function App() {
   const connectionStatusRef = useRef<ConnectionStatus>("checking");
   const navigationRecoveryRequestedRef = useRef(0);
   const navigationRecoverySatisfiedRef = useRef(0);
-  const navigationRecoveryInFlightRef = useRef(false);
+  const backgroundNavigationInFlightRef = useRef(false);
 
   const markConnected = useCallback(() => {
     const recovered = connectionStatusRef.current === "unavailable";
@@ -329,14 +329,14 @@ export function App() {
 
   const beginNavigationRecovery = useCallback(() => {
     const generation = ++navigationRecoveryRequestedRef.current;
-    if (navigationRecoveryInFlightRef.current) return;
-    navigationRecoveryInFlightRef.current = true;
+    if (backgroundNavigationInFlightRef.current) return;
+    backgroundNavigationInFlightRef.current = true;
     void refreshNavigation()
       .then((applied) => {
         if (applied) navigationRecoverySatisfiedRef.current = generation;
       })
       .finally(() => {
-        navigationRecoveryInFlightRef.current = false;
+        backgroundNavigationInFlightRef.current = false;
       });
   }, [refreshNavigation]);
 
@@ -529,7 +529,11 @@ export function App() {
   useEffect(() => {
     const interval = window.setInterval(() => {
       if (document.visibilityState !== "visible") return;
-      void refreshNavigation(true);
+      if (backgroundNavigationInFlightRef.current) return;
+      backgroundNavigationInFlightRef.current = true;
+      void refreshNavigation(true).finally(() => {
+        backgroundNavigationInFlightRef.current = false;
+      });
     }, 30000);
     return () => window.clearInterval(interval);
   }, [refreshNavigation]);
