@@ -327,9 +327,10 @@ export function App() {
     [clearTarget, markConnected, markUnavailable],
   );
 
-  const beginNavigationRecovery = useCallback(() => {
-    const generation = ++navigationRecoveryRequestedRef.current;
+  const launchNavigationRecovery = useCallback(() => {
     if (backgroundNavigationInFlightRef.current) return;
+    const generation = navigationRecoveryRequestedRef.current;
+    if (generation <= navigationRecoverySatisfiedRef.current) return;
     backgroundNavigationInFlightRef.current = true;
     void refreshNavigation()
       .then((applied) => {
@@ -339,6 +340,11 @@ export function App() {
         backgroundNavigationInFlightRef.current = false;
       });
   }, [refreshNavigation]);
+
+  const beginNavigationRecovery = useCallback(() => {
+    navigationRecoveryRequestedRef.current += 1;
+    launchNavigationRecovery();
+  }, [launchNavigationRecovery]);
 
   const refreshOutput = useCallback(async () => {
     if (!target) {
@@ -519,13 +525,13 @@ export function App() {
         navigationRecoveryRequestedRef.current >
         navigationRecoverySatisfiedRef.current
       )
-        beginNavigationRecovery();
+        launchNavigationRecovery();
       void Promise.all([refreshOutput(), refreshAgents()]).finally(() => {
         isPolling.current = false;
       });
     }, 4000);
     return () => window.clearInterval(interval);
-  }, [beginNavigationRecovery, refreshAgents, refreshOutput]);
+  }, [launchNavigationRecovery, refreshAgents, refreshOutput]);
   useEffect(() => {
     const interval = window.setInterval(() => {
       if (document.visibilityState !== "visible") return;
