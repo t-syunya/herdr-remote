@@ -508,11 +508,30 @@ export function App() {
         `${viewport.height}px`,
       );
     };
+
+    const keepCommandVisible = () => {
+      if (viewport.scale !== 1) return;
+
+      const command = document.activeElement;
+      if (command instanceof HTMLTextAreaElement && command.id === "command") {
+        window.requestAnimationFrame(() =>
+          command.scrollIntoView({
+            block: "nearest",
+            behavior: window.matchMedia("(prefers-reduced-motion: reduce)")
+              .matches
+              ? "auto"
+              : "smooth",
+          }),
+        );
+      }
+    };
     updateViewportHeight();
     viewport.addEventListener("resize", updateViewportHeight);
+    viewport.addEventListener("resize", keepCommandVisible);
     viewport.addEventListener("scroll", updateViewportHeight);
     return () => {
       viewport.removeEventListener("resize", updateViewportHeight);
+      viewport.removeEventListener("resize", keepCommandVisible);
       viewport.removeEventListener("scroll", updateViewportHeight);
       document.documentElement.style.removeProperty("--visual-viewport-height");
     };
@@ -1020,6 +1039,7 @@ export function App() {
         </label>
         <textarea
           aria-describedby="command-hint"
+          autoCapitalize="off"
           disabled={!target || isSending}
           enterKeyHint="enter"
           id="command"
@@ -1028,6 +1048,7 @@ export function App() {
           placeholder={
             target ? "入力してください" : "先に操作対象を選択してください"
           }
+          spellCheck={false}
           rows={4}
           value={input}
         />
