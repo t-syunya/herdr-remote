@@ -463,10 +463,18 @@ export function App() {
     };
 
     const keepCommandVisible = () => {
+      if (viewport.scale !== 1) return;
+
       const command = document.activeElement;
       if (command instanceof HTMLTextAreaElement && command.id === "command") {
         window.requestAnimationFrame(() =>
-          command.scrollIntoView({ block: "nearest", behavior: "smooth" }),
+          command.scrollIntoView({
+            block: "nearest",
+            behavior: window.matchMedia("(prefers-reduced-motion: reduce)")
+              .matches
+              ? "auto"
+              : "smooth",
+          }),
         );
       }
     };

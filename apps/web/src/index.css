@@ -224,8 +224,14 @@ pre {
   padding-bottom: calc(0.9rem + env(safe-area-inset-bottom));
 }
 textarea {
-  min-height: min(7rem, calc(var(--visual-viewport-height, 100vh) * 0.2));
-  max-height: min(35vh, calc(var(--visual-viewport-height, 100vh) * 0.3));
+  min-height: max(
+    3.25rem,
+    min(7rem, calc(var(--visual-viewport-height, 100vh) * 0.2))
+  );
+  max-height: max(
+    3.25rem,
+    min(35vh, calc(var(--visual-viewport-height, 100vh) * 0.3))
+  );
   overflow-y: auto;
   resize: none;
   font-size: 16px;
