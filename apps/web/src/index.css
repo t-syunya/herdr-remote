@@ -226,11 +226,11 @@ pre {
 textarea {
   min-height: max(
     3.25rem,
-    min(7rem, calc(var(--visual-viewport-height, 100vh) * 0.2))
+    min(5rem, calc(var(--visual-viewport-height, 100vh) * 0.16))
   );
   max-height: max(
     3.25rem,
-    min(35vh, calc(var(--visual-viewport-height, 100vh) * 0.3))
+    min(30vh, calc(var(--visual-viewport-height, 100vh) * 0.3))
   );
   overflow-y: auto;
   resize: none;

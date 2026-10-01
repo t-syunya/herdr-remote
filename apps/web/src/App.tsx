@@ -1085,7 +1085,7 @@ export function App() {
             target ? "入力してください" : "先に操作対象を選択してください"
           }
           spellCheck={false}
-          rows={4}
+          rows={2}
           value={input}
         />
         <p className="hint composer-hint" id="command-hint">
