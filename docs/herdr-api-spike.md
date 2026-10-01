@@ -44,6 +44,11 @@ c48f1f54ee0150ca27e11fd44455fe94aeadb20fdf4e4a62393ed822a4e5b150
 検証用セッションのログ・永続状態は設定ファイルの指定とは別に
 `$HOME/.config/herdr/sessions/phase0-spike/` に作られた。
 
+2026-09-30 の追加確認では Herdr 0.9.2 のスキーマで Workspace の
+`active_tab_id` が文字列フィールドとして定義され、読み取り専用の live snapshot にも
+各 Workspace の `active_tab_id` が含まれることを確認した。タブ追従はこの値を使い、
+`tab.focus` の呼び出しや Herdr の状態変更は行っていない。
+
 ## スキーマと対応機能
 
 | 項目                    | 結果                                                                            |

@@ -168,6 +168,27 @@ test("必須の数値メタデータが不正な Workspace と Tab を拒否す�
   );
 });
 
+test("Workspace の active_tab_id を安定モデルへ写し、未提供なら省略する", () => {
+  assert.equal(
+    mapWorkspace({
+      workspace_id: "w1",
+      label: "Work",
+      active_tab_id: "w1:t2",
+      tab_count: 2,
+      pane_count: 3,
+    }).activeTabId,
+    "w1:t2",
+  );
+  assert.equal(
+    mapWorkspace({
+      workspace_id: "w1",
+      tab_count: 0,
+      pane_count: 0,
+    }).activeTabId,
+    undefined,
+  );
+});
+
 test("入力の想定外の応答を拒否する", () => {
   assert.throws(
     () => expectOk({ type: "unexpected" }),

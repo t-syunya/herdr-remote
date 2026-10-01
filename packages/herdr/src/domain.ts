@@ -3,6 +3,7 @@ export type AgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
 export type Workspace = {
   id: string;
   label: string;
+  activeTabId?: string;
   tabCount: number;
   paneCount: number;
   status: AgentStatus;
