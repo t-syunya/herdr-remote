@@ -7,11 +7,13 @@ import {
 } from "react";
 
 import { api } from "./api";
+import { resolveRefreshedTab } from "./navigation";
 
 type AgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
 type Workspace = {
   id: string;
   label: string;
+  activeTabId?: string;
   tabCount: number;
   paneCount: number;
   status: AgentStatus;
@@ -191,6 +193,9 @@ export function App() {
   const targetRef = useRef<Target | undefined>(undefined);
   const workspaceIdRef = useRef<string | undefined>(undefined);
   const tabIdRef = useRef<string | undefined>(undefined);
+  const herdrActiveTabRef = useRef<
+    { workspaceId: string; tabId: string } | undefined
+  >(undefined);
   const isPolling = useRef(false);
   const outputElement = useRef<HTMLPreElement>(null);
   const wasAtOutputEnd = useRef(true);
@@ -255,6 +260,8 @@ export function App() {
         let nextTabs: Tab[] = [];
         let nextPanes: Pane[] = [];
         let nextTabId: string | undefined;
+        let herdrTabChanged = false;
+        let nextActiveTabSnapshot = herdrActiveTabRef.current;
         if (nextWorkspaceId) {
           const tabsResponse = await api.api.workspaces[
             ":workspaceId"
@@ -264,9 +271,19 @@ export function App() {
               await messageFor(tabsResponse, "タブを取得できません。"),
             );
           nextTabs = ((await tabsResponse.json()) as { tabs: Tab[] }).tabs;
-          nextTabId = nextTabs.some((tab) => tab.id === tabIdRef.current)
-            ? tabIdRef.current
-            : nextTabs[0]?.id;
+          const activeTabId = nextWorkspaces.find(
+            (workspace) => workspace.id === nextWorkspaceId,
+          )?.activeTabId;
+          const resolvedTab = resolveRefreshedTab(
+            nextTabs,
+            nextWorkspaceId,
+            activeTabId,
+            tabIdRef.current,
+            herdrActiveTabRef.current,
+          );
+          nextTabId = resolvedTab.tabId;
+          herdrTabChanged = resolvedTab.activeTabChanged;
+          nextActiveTabSnapshot = resolvedTab.activeTabSnapshot;
           if (nextTabId) {
             const panesResponse = await api.api.tabs[":tabId"].panes.$get({
               param: { tabId: nextTabId },
@@ -295,9 +312,16 @@ export function App() {
           setAgents(nextAgents.agents);
           if (
             currentTarget?.kind === "agent" &&
-            !nextAgents.agents.some(
+            (!nextAgents.agents.some(
               (agent) => agent.paneId === currentTarget.paneId,
-            )
+            ) ||
+              (herdrTabChanged &&
+                !nextAgents.agents.some(
+                  (agent) =>
+                    agent.paneId === currentTarget.paneId &&
+                    agent.workspaceId === nextWorkspaceId &&
+                    agent.tabId === nextTabId,
+                )))
           ) {
             clearTarget();
           }
@@ -312,6 +336,7 @@ export function App() {
         workspaceIdRef.current = nextWorkspaceId;
         setTabId(nextTabId);
         tabIdRef.current = nextTabId;
+        herdrActiveTabRef.current = nextActiveTabSnapshot;
         markConnected();
         setNavigationError(undefined);
         return true;
@@ -496,7 +521,7 @@ export function App() {
   }, [refreshNavigation]);
   useEffect(() => {
     void refreshOutput();
-  }, [refreshOutput]);
+  }, [refreshOutput, tabId]);
   useEffect(() => {
     const viewport = window.visualViewport;
     if (!viewport) return;
@@ -600,7 +625,17 @@ export function App() {
         throw new Error(await messageFor(response, "タブを取得できません。"));
       }
       const nextTabs = ((await response.json()) as { tabs: Tab[] }).tabs;
-      const nextTabId = nextTabs[0]?.id;
+      const selectedWorkspace = workspaces.find(
+        (workspace) => workspace.id === nextWorkspaceId,
+      );
+      const resolvedTab = resolveRefreshedTab(
+        nextTabs,
+        nextWorkspaceId,
+        selectedWorkspace?.activeTabId,
+        undefined,
+        herdrActiveTabRef.current,
+      );
+      const nextTabId = resolvedTab.tabId;
       let nextPanes: Pane[] = [];
       if (nextTabId) {
         const panesResponse = await api.api.tabs[":tabId"].panes.$get({
@@ -621,6 +656,7 @@ export function App() {
       setPanes(nextPanes);
       setTabId(nextTabId);
       tabIdRef.current = nextTabId;
+      herdrActiveTabRef.current = resolvedTab.activeTabSnapshot;
       setNavigationError(undefined);
       if (markConnected()) beginNavigationRecovery();
     } catch (cause) {

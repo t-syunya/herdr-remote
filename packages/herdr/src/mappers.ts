@@ -36,6 +36,9 @@ export function mapWorkspace(value: unknown): Workspace {
   return {
     id: string(raw.workspace_id, "workspace_id"),
     label: typeof raw.label === "string" ? raw.label : "",
+    ...(typeof raw.active_tab_id === "string"
+      ? { activeTabId: raw.active_tab_id }
+      : {}),
     tabCount: number(raw.tab_count, "tab_count"),
     paneCount: number(raw.pane_count, "pane_count"),
     status: normalizeAgentStatus(raw.agent_status),

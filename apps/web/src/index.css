@@ -29,7 +29,7 @@ button:disabled {
   max-width: 42rem;
   margin: 0 auto;
   min-height: 100vh;
-  min-height: 100dvh;
+  min-height: var(--visual-viewport-height, 100dvh);
   padding: calc(1rem + env(safe-area-inset-top)) 1rem
     calc(1rem + env(safe-area-inset-bottom));
 }
