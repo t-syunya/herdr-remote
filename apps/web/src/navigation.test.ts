@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   readSavedNavigation,
+  resolveAgentTabId,
   resolveSavedTabId,
   resolveRefreshedTab,
   resolveWorkspaceId,
@@ -9,6 +10,27 @@ import {
 } from "./navigation.js";
 
 const tabs = [{ id: "w1:t1" }, { id: "w1:t2" }];
+
+test("Agentの所属タブを選び、消失や所属不一致では別タブへ戻さない", () => {
+  const agent = { workspaceId: "w2", tabId: "w2:t2" };
+  const agentTabs = [
+    { id: "w2:t1", workspaceId: "w2" },
+    { id: "w2:t2", workspaceId: "w2" },
+  ];
+  assert.equal(resolveAgentTabId(agentTabs, agent), "w2:t2");
+  assert.throws(() => resolveAgentTabId([], agent), /所属タブ/);
+  assert.throws(
+    () => resolveAgentTabId([{ id: "w2:t2", workspaceId: "w1" }], agent),
+    /所属タブ/,
+  );
+  assert.equal(
+    resolveRefreshedTab(agentTabs, "w2", "w2:t1", "w2:t2", {
+      workspaceId: "w2",
+      tabId: "w2:t1",
+    }).tabId,
+    "w2:t2",
+  );
+});
 
 test("Herdr 側でアクティブタブが変わったら切替先を選ぶ", () => {
   const result = resolveRefreshedTab(tabs, "w1", "w1:t2", "w1:t1", {
