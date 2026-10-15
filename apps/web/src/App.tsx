@@ -9,6 +9,7 @@ import {
 import { api } from "./api";
 import {
   readSavedNavigation,
+  resolveAgentTabId,
   resolveSavedTabId,
   resolveRefreshedTab,
   resolveWorkspaceId,
@@ -646,7 +647,16 @@ export function App() {
     };
   }, [refreshAll]);
 
-  async function selectWorkspace(nextWorkspaceId: string) {
+  async function selectWorkspace(nextWorkspaceId: string, agent?: Agent) {
+    if (
+      agent &&
+      targetRef.current?.kind === "agent" &&
+      targetRef.current.paneId === agent.paneId &&
+      workspaceIdRef.current === agent.workspaceId &&
+      tabIdRef.current === agent.tabId
+    ) {
+      return;
+    }
     const requestId = ++navigationRequestId.current;
     setIsRefreshing(false);
     workspaceIdRef.current = nextWorkspaceId;
@@ -677,7 +687,9 @@ export function App() {
         undefined,
         herdrActiveTabRef.current,
       );
-      const nextTabId = resolvedTab.tabId;
+      const nextTabId = agent
+        ? resolveAgentTabId(nextTabs, agent)
+        : resolvedTab.tabId;
       let nextPanes: Pane[] = [];
       if (nextTabId) {
         const panesResponse = await api.api.tabs[":tabId"].panes.$get({
@@ -694,6 +706,19 @@ export function App() {
         nextPanes = ((await panesResponse.json()) as { panes: Pane[] }).panes;
       }
       if (requestId !== navigationRequestId.current) return;
+      if (
+        agent &&
+        !nextPanes.some(
+          (pane) =>
+            pane.id === agent.paneId &&
+            pane.workspaceId === agent.workspaceId &&
+            pane.tabId === agent.tabId,
+        )
+      ) {
+        throw new Error(
+          "Agent の所属ペインが見つかりません。一覧を更新してください。",
+        );
+      }
       setTabs(nextTabs);
       setPanes(nextPanes);
       setTabId(nextTabId);
@@ -704,6 +729,7 @@ export function App() {
           ? { workspaceId: nextWorkspaceId, tabId: nextTabId }
           : undefined,
       );
+      if (agent) selectTarget({ kind: "agent", paneId: agent.paneId });
       setNavigationError(undefined);
       if (markConnected()) beginNavigationRecovery();
     } catch (cause) {
@@ -1013,9 +1039,7 @@ export function App() {
           {panes.map((pane) => (
             <button
               className={
-                target?.kind === "pane" && target.paneId === pane.id
-                  ? "target selected"
-                  : "target"
+                target?.paneId === pane.id ? "target selected" : "target"
               }
               key={pane.id}
               disabled={isSending}
@@ -1040,9 +1064,7 @@ export function App() {
               }
               key={agent.paneId}
               disabled={isSending}
-              onClick={() =>
-                selectTarget({ kind: "agent", paneId: agent.paneId })
-              }
+              onClick={() => void selectWorkspace(agent.workspaceId, agent)}
               type="button"
             >
               <span>{agent.name ?? agent.kind ?? "名前のない Agent"}</span>
@@ -1131,6 +1153,18 @@ export function App() {
               : `ペイン ${panes.find((pane) => pane.id === target.paneId)?.title ?? target.paneId}（テキスト）`
             : "未選択"}
         </p>
+        {selectedAgent && (
+          <p className="hint">
+            場所:{" "}
+            {workspaces.find((workspace) => workspace.id === workspaceId)
+              ?.label ?? selectedAgent.workspaceId}
+            {" / "}
+            {tabs.find((tab) => tab.id === tabId)?.label ?? selectedAgent.tabId}
+            {" / "}
+            {panes.find((pane) => pane.id === selectedAgent.paneId)?.title ??
+              selectedAgent.paneId}
+          </p>
+        )}
         <label htmlFor="command">
           {target?.kind === "agent"
             ? "Agent に送るプロンプト"

@@ -79,6 +79,22 @@ export function resolveSavedTabId(
   return tabs[0]?.id;
 }
 
+export function resolveAgentTabId(
+  tabs: readonly { id: string; workspaceId: string }[],
+  agent: { workspaceId: string; tabId: string },
+) {
+  if (
+    !tabs.some(
+      (tab) => tab.id === agent.tabId && tab.workspaceId === agent.workspaceId,
+    )
+  ) {
+    throw new Error(
+      "Agent の所属タブが見つかりません。一覧を更新してください。",
+    );
+  }
+  return agent.tabId;
+}
+
 export function resolveRefreshedTab(
   tabs: readonly { id: string }[],
   workspaceId: string,
