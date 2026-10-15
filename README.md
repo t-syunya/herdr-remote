@@ -113,3 +113,13 @@ iPhone から同じ URL を開ける。事前に `tailscale` コマンドに PAT
 Tailscale の IP アドレスは tailnet 内のデバイスからしか到達できないため、
 公開インターネットには露出しない。API リクエストは Vite のプロキシ経由で Mac 内の Server（`127.0.0.1:8787`）へ転送され、
 Server と Herdr のローカルソケットが直接外部へ公開されることはない。
+
+MagicDNS のホスト名で開く場合は、Vite の環境変数で許可するホスト名を追加する。
+
+```sh
+export __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=macbook-pro.tail339072.ts.net
+make up
+# Docker を使わない場合: pnpm dev:tailscale
+```
+
+設定変更後は `make up` を再実行する。Docker を使わない場合は開発サーバーを再起動する。

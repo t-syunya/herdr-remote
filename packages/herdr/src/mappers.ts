@@ -8,6 +8,9 @@ import type {
 } from "./domain.js";
 import { InvalidHerdrResponseError } from "./errors.js";
 type RawRecord = Record<string, unknown>;
+const maxOutputLines = 200;
+const maxOutputBytes = 256 * 1024;
+
 function record(value: unknown, context: string): RawRecord {
   if (typeof value !== "object" || value === null || Array.isArray(value))
     throw new InvalidHerdrResponseError(`${context} の形式が不正です。`);
@@ -85,13 +88,71 @@ export function mapPaneOutput(value: unknown): PaneOutput {
   const raw = record(value, "pane read");
   if (typeof raw.truncated !== "boolean")
     throw new InvalidHerdrResponseError("truncated の形式が不正です。");
+  const limited = limitOutputText(string(raw.text, "text"));
   return {
     paneId: string(raw.pane_id, "pane_id"),
     workspaceId: string(raw.workspace_id, "workspace_id"),
     tabId: string(raw.tab_id, "tab_id"),
-    text: string(raw.text, "text"),
-    truncated: raw.truncated,
+    text: limited.text,
+    truncated: raw.truncated || limited.truncated,
   };
+}
+
+function limitOutputText(text: string) {
+  let limitedText = text;
+  let truncated = false;
+  let lineBreaks = 0;
+
+  for (let index = text.length - 1; index >= 0; index -= 1) {
+    if (text.charCodeAt(index) !== 10) continue;
+    lineBreaks += 1;
+    if (lineBreaks === maxOutputLines) {
+      limitedText = text.slice(index + 1);
+      truncated = true;
+      break;
+    }
+  }
+
+  let start = limitedText.length;
+  let byteLength = 0;
+  while (start > 0) {
+    let characterStart = start - 1;
+    const lastCodeUnit = limitedText.charCodeAt(characterStart);
+    let characterBytes: number;
+
+    if (lastCodeUnit >= 0xdc00 && lastCodeUnit <= 0xdfff) {
+      const previousCodeUnit =
+        characterStart > 0 ? limitedText.charCodeAt(characterStart - 1) : 0;
+      if (previousCodeUnit >= 0xd800 && previousCodeUnit <= 0xdbff) {
+        characterStart -= 1;
+        characterBytes = 4;
+      } else {
+        characterBytes = 3;
+      }
+    } else if (lastCodeUnit >= 0xd800 && lastCodeUnit <= 0xdbff) {
+      characterBytes = 3;
+    } else if (lastCodeUnit <= 0x7f) {
+      characterBytes = 1;
+    } else if (lastCodeUnit <= 0x7ff) {
+      characterBytes = 2;
+    } else {
+      characterBytes = 3;
+    }
+
+    if (byteLength + characterBytes > maxOutputBytes) {
+      truncated = true;
+      break;
+    }
+    byteLength += characterBytes;
+    start = characterStart;
+  }
+
+  if (start > 0) {
+    limitedText = limitedText.slice(start);
+    truncated = true;
+  }
+
+  return { text: limitedText, truncated };
 }
 export function resultItems(result: RawRecord, key: string): unknown[] {
   if (!Array.isArray(result[key]))

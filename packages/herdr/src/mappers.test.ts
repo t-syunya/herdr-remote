@@ -146,6 +146,81 @@ test("truncated が boolean でない出力を拒否する", () => {
   );
 });
 
+test("出力行数と UTF-8 応答サイズを超えた場合は末尾を残して省略する", () => {
+  const lineLimited = mapPaneOutput({
+    pane_id: "w1:p1",
+    workspace_id: "w1",
+    tab_id: "w1:t1",
+    text: Array.from({ length: 205 }, (_, index) => `line ${index}`).join("\n"),
+    truncated: false,
+  });
+  assert.equal(lineLimited.text.split("\n").length, 200);
+  assert.ok(lineLimited.text.startsWith("line 5\n"));
+  assert.ok(lineLimited.text.endsWith("line 204"));
+  assert.equal(lineLimited.truncated, true);
+
+  const byteLimited = mapPaneOutput({
+    pane_id: "w1:p1",
+    workspace_id: "w1",
+    tab_id: "w1:t1",
+    text: `${"🙂".repeat(70_000)}END`,
+    truncated: false,
+  });
+  assert.ok(
+    new TextEncoder().encode(byteLimited.text).byteLength <= 256 * 1024,
+  );
+  assert.ok(byteLimited.text.endsWith("END"));
+  assert.ok(byteLimited.text.charCodeAt(0) >= 0xd800);
+  assert.ok(byteLimited.text.charCodeAt(0) <= 0xdbff);
+  assert.ok(byteLimited.text.length > 1);
+  assert.ok(byteLimited.text.charCodeAt(1) >= 0xdc00);
+  assert.ok(byteLimited.text.charCodeAt(1) <= 0xdfff);
+  assert.equal(byteLimited.truncated, true);
+});
+
+test("4 MiBを超えるPane出力応答も失敗せず最新部分を返す", async () => {
+  const directory = await mkdtemp(`${tmpdir()}/herdr-adapter-test-`);
+  const socketPath = `${directory}/herdr.sock`;
+  const text = `${"x".repeat(4 * 1024 * 1024)}TAIL`;
+  const server = createServer((socket) => {
+    socket.once("data", (chunk: Buffer) => {
+      const request = requestPayload(chunk);
+      assert.equal(request.method, "pane.read");
+      socket.end(
+        `${JSON.stringify({
+          id: request.id,
+          result: {
+            type: "pane_read",
+            read: {
+              pane_id: "w1:p1",
+              workspace_id: "w1",
+              tab_id: "w1:t1",
+              text,
+              revision: 1,
+              truncated: false,
+            },
+          },
+        })}\n`,
+      );
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+  try {
+    const output = await withSocketPath(socketPath, () =>
+      createHerdrClient().readPane("w1:p1"),
+    );
+    assert.ok(new TextEncoder().encode(output.text).byteLength <= 256 * 1024);
+    assert.ok(output.text.endsWith("TAIL"));
+    assert.equal(output.truncated, true);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("必須の数値メタデータが不正な Workspace と Tab を拒否する", () => {
   assert.throws(
     () =>
