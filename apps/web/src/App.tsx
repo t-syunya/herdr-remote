@@ -7,7 +7,13 @@ import {
 } from "react";
 
 import { api } from "./api";
-import { resolveRefreshedTab } from "./navigation";
+import {
+  readSavedNavigation,
+  resolveSavedTabId,
+  resolveRefreshedTab,
+  resolveWorkspaceId,
+  writeSavedNavigation,
+} from "./navigation";
 
 type AgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
 type Workspace = {
@@ -72,6 +78,14 @@ function isRequestTimeout(cause: unknown) {
 
 function isConnectionFailure(cause: unknown) {
   return cause instanceof TypeError || isRequestTimeout(cause);
+}
+
+function isUncertainWriteStatus(status: number) {
+  return status === 502 || status === 503 || status === 504;
+}
+
+function isConnectionUnavailableStatus(status: number) {
+  return status === 503 || status === 504;
 }
 
 function errorMessage(cause: unknown, fallback: string) {
@@ -193,6 +207,7 @@ export function App() {
   const targetRef = useRef<Target | undefined>(undefined);
   const workspaceIdRef = useRef<string | undefined>(undefined);
   const tabIdRef = useRef<string | undefined>(undefined);
+  const hasRestoredNavigationRef = useRef(false);
   const herdrActiveTabRef = useRef<
     { workspaceId: string; tabId: string } | undefined
   >(undefined);
@@ -236,6 +251,10 @@ export function App() {
       const requestId = ++navigationRequestId.current;
       if (!silent) setIsRefreshing(true);
       try {
+        const shouldRestoreNavigation = !hasRestoredNavigationRef.current;
+        const savedNavigation = shouldRestoreNavigation
+          ? readSavedNavigation()
+          : undefined;
         const statusResponse = await api.api.status.$get();
         if (!statusResponse.ok)
           throw new Error(
@@ -252,11 +271,11 @@ export function App() {
         const nextWorkspaces = (
           (await workspacesResponse.json()) as { workspaces: Workspace[] }
         ).workspaces;
-        const nextWorkspaceId = nextWorkspaces.some(
-          (workspace) => workspace.id === workspaceIdRef.current,
-        )
-          ? workspaceIdRef.current
-          : nextWorkspaces[0]?.id;
+        const nextWorkspaceId = resolveWorkspaceId(
+          nextWorkspaces,
+          shouldRestoreNavigation ? savedNavigation?.workspaceId : undefined,
+          workspaceIdRef.current,
+        );
         let nextTabs: Tab[] = [];
         let nextPanes: Pane[] = [];
         let nextTabId: string | undefined;
@@ -274,16 +293,33 @@ export function App() {
           const activeTabId = nextWorkspaces.find(
             (workspace) => workspace.id === nextWorkspaceId,
           )?.activeTabId;
-          const resolvedTab = resolveRefreshedTab(
-            nextTabs,
-            nextWorkspaceId,
-            activeTabId,
-            tabIdRef.current,
-            herdrActiveTabRef.current,
-          );
-          nextTabId = resolvedTab.tabId;
-          herdrTabChanged = resolvedTab.activeTabChanged;
-          nextActiveTabSnapshot = resolvedTab.activeTabSnapshot;
+          const restoringSavedTab =
+            shouldRestoreNavigation &&
+            savedNavigation?.workspaceId === nextWorkspaceId;
+          if (restoringSavedTab && savedNavigation) {
+            nextTabId = resolveSavedTabId(
+              nextTabs,
+              savedNavigation.tabId,
+              activeTabId,
+            );
+            if (activeTabId && nextTabs.some((tab) => tab.id === activeTabId)) {
+              nextActiveTabSnapshot = {
+                workspaceId: nextWorkspaceId,
+                tabId: activeTabId,
+              };
+            }
+          } else {
+            const resolvedTab = resolveRefreshedTab(
+              nextTabs,
+              nextWorkspaceId,
+              activeTabId,
+              tabIdRef.current,
+              herdrActiveTabRef.current,
+            );
+            nextTabId = resolvedTab.tabId;
+            herdrTabChanged = resolvedTab.activeTabChanged;
+            nextActiveTabSnapshot = resolvedTab.activeTabSnapshot;
+          }
           if (nextTabId) {
             const panesResponse = await api.api.tabs[":tabId"].panes.$get({
               param: { tabId: nextTabId },
@@ -337,6 +373,12 @@ export function App() {
         setTabId(nextTabId);
         tabIdRef.current = nextTabId;
         herdrActiveTabRef.current = nextActiveTabSnapshot;
+        hasRestoredNavigationRef.current = true;
+        writeSavedNavigation(
+          nextWorkspaceId && nextTabId
+            ? { workspaceId: nextWorkspaceId, tabId: nextTabId }
+            : undefined,
+        );
         markConnected();
         setNavigationError(undefined);
         return true;
@@ -657,6 +699,11 @@ export function App() {
       setTabId(nextTabId);
       tabIdRef.current = nextTabId;
       herdrActiveTabRef.current = resolvedTab.activeTabSnapshot;
+      writeSavedNavigation(
+        nextTabId
+          ? { workspaceId: nextWorkspaceId, tabId: nextTabId }
+          : undefined,
+      );
       setNavigationError(undefined);
       if (markConnected()) beginNavigationRecovery();
     } catch (cause) {
@@ -686,6 +733,11 @@ export function App() {
       const nextPanes = (await response.json()) as { panes: Pane[] };
       if (requestId !== navigationRequestId.current) return;
       setPanes(nextPanes.panes);
+      writeSavedNavigation(
+        workspaceIdRef.current
+          ? { workspaceId: workspaceIdRef.current, tabId: nextTabId }
+          : undefined,
+      );
       setNavigationError(undefined);
       if (markConnected()) beginNavigationRecovery();
     } catch (cause) {
@@ -724,8 +776,10 @@ export function App() {
         );
         if (!response.ok) {
           const message = await messageFor(response, "送信できません。");
-          if (response.status === 503 || response.status === 504) {
-            markUnavailable();
+          if (isUncertainWriteStatus(response.status)) {
+            if (isConnectionUnavailableStatus(response.status)) {
+              markUnavailable();
+            }
             throw new RequestOutcomeUnknownError(message);
           }
           throw new Error(message);
@@ -740,8 +794,10 @@ export function App() {
         );
         if (!response.ok) {
           const message = await messageFor(response, "送信できません。");
-          if (response.status === 503 || response.status === 504) {
-            markUnavailable();
+          if (isUncertainWriteStatus(response.status)) {
+            if (isConnectionUnavailableStatus(response.status)) {
+              markUnavailable();
+            }
             throw new RequestOutcomeUnknownError(message);
           }
           throw new Error(message);
@@ -758,7 +814,7 @@ export function App() {
               cause instanceof RequestOutcomeUnknownError ||
               isConnectionFailure(cause)
             ) {
-              markUnavailable();
+              if (isConnectionFailure(cause)) markUnavailable();
               setActionError(
                 "本文は送信済みです。Enterの送信結果を確認できないため、出力を確認してください。",
               );
@@ -779,19 +835,21 @@ export function App() {
     } catch (cause) {
       if (
         cause instanceof HerdrUnavailableRequestError ||
-        cause instanceof RequestOutcomeUnknownError ||
         isConnectionFailure(cause)
       ) {
         markUnavailable();
       }
-      setActionError(
+      const outcomeUnknown =
         cause instanceof RequestOutcomeUnknownError ||
-          isConnectionFailure(cause)
+        isConnectionFailure(cause);
+      setActionError(
+        outcomeUnknown
           ? "送信結果を確認できません。出力を確認してから再送してください。"
           : cause instanceof Error
             ? cause.message
             : "送信できません。",
       );
+      if (outcomeUnknown) void refreshOutput();
     } finally {
       setIsSending(false);
     }
@@ -804,11 +862,10 @@ export function App() {
     );
     if (!response.ok) {
       const message = await messageFor(response, "キーを送信できません。");
-      if (
-        response.status === 502 ||
-        response.status === 503 ||
-        response.status === 504
-      ) {
+      if (isUncertainWriteStatus(response.status)) {
+        if (isConnectionUnavailableStatus(response.status)) {
+          markUnavailable();
+        }
         throw new RequestOutcomeUnknownError(message);
       }
       throw new Error(message);
@@ -828,8 +885,10 @@ export function App() {
       );
       if (!response.ok) {
         const message = await messageFor(response, "キーを送信できません。");
-        if (response.status === 503 || response.status === 504) {
-          markUnavailable();
+        if (isUncertainWriteStatus(response.status)) {
+          if (isConnectionUnavailableStatus(response.status)) {
+            markUnavailable();
+          }
           throw new RequestOutcomeUnknownError(message);
         }
         throw new Error(message);
@@ -840,19 +899,21 @@ export function App() {
     } catch (cause) {
       if (
         cause instanceof HerdrUnavailableRequestError ||
-        cause instanceof RequestOutcomeUnknownError ||
         isConnectionFailure(cause)
       ) {
         markUnavailable();
       }
-      setActionError(
+      const outcomeUnknown =
         cause instanceof RequestOutcomeUnknownError ||
-          isConnectionFailure(cause)
+        isConnectionFailure(cause);
+      setActionError(
+        outcomeUnknown
           ? "キーの送信結果を確認できません。出力を確認してから操作してください。"
           : cause instanceof Error
             ? cause.message
             : "キーを送信できません。",
       );
+      if (outcomeUnknown) void refreshOutput();
     } finally {
       setIsSending(false);
     }
@@ -1056,7 +1117,9 @@ export function App() {
           </p>
         )}
         {output?.truncated && (
-          <p className="hint">表示は直近の出力に省略されています。</p>
+          <p className="hint">
+            出力上限のため先頭側を省略し、最新部分を表示しています。
+          </p>
         )}
       </section>
       <section className="controls" aria-label="入力">

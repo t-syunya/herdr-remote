@@ -78,7 +78,9 @@ up:
 		if { \
 			printf '%s\n%s\n%s\n' "$$HERDR_SOCKET_PATH" "$$HERDR_RELAY_PORT" "$$WEB_TARGET_PORT"; \
 			printf '%s\n' "$(COMPOSE)"; \
+			printf '%s\n' "$$__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS"; \
 			shasum -a 256 compose.yaml Dockerfile; \
+			if [ -f .env ]; then shasum -a 256 .env; fi; \
 			printf '%s' "$$token" | shasum -a 256; \
 		} | cmp -s - "$(COMPOSE_WATCH_CONFIG_FILE)" && \
 			HERDR_RELAY_TOKEN="$$token" $(COMPOSE) ps --status running --services 2>/dev/null | grep -Fxq herdr-remote; then \
@@ -100,7 +102,9 @@ up:
 		(umask 077; { \
 			printf '%s\n%s\n%s\n' "$$HERDR_SOCKET_PATH" "$$HERDR_RELAY_PORT" "$$WEB_TARGET_PORT"; \
 			printf '%s\n' "$(COMPOSE)"; \
+			printf '%s\n' "$$__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS"; \
 			shasum -a 256 compose.yaml Dockerfile; \
+			if [ -f .env ]; then shasum -a 256 .env; fi; \
 			printf '%s' "$$token" | shasum -a 256; \
 		} > "$(COMPOSE_WATCH_CONFIG_FILE)"); \
 	fi; \

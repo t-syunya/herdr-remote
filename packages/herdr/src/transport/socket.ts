@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { connect } from "node:net";
 import { createHmac, randomUUID } from "node:crypto";
+import { StringDecoder } from "node:string_decoder";
 import {
   HerdrAccessDeniedError,
   HerdrUnavailableError,
@@ -10,7 +11,9 @@ import {
 import type { RawRequest, RawResponse } from "../raw/types.js";
 
 const defaultTimeoutMs = 10_000;
-const maxResponseBytes = 4 * 1024 * 1024;
+const maxResponseBytes = 16 * 1024 * 1024;
+const maxOutputHeaderBytes = 1024 * 1024;
+const retainedOutputCharacters = 512 * 1024;
 
 export class SocketTransport {
   readonly socketPath: string;
@@ -38,6 +41,7 @@ export class SocketTransport {
     params: Record<string, unknown>,
   ): Promise<RawResponse> {
     const request: RawRequest = { id: randomUUID(), method, params };
+    const isOutputRead = method === "pane.read" || method === "agent.read";
     return new Promise((resolve, reject) => {
       const socket =
         this.relayHost && this.relayPort && this.relayToken
@@ -48,6 +52,9 @@ export class SocketTransport {
       );
       const payload = `${JSON.stringify(request)}\n`;
       const chunks: Buffer[] = [];
+      const outputCollector = isOutputRead
+        ? new OutputResponseCollector()
+        : null;
       let receivedBytes = 0;
       let settled = false;
       let relayChallenge = Buffer.alloc(0);
@@ -77,6 +84,16 @@ export class SocketTransport {
       });
       const collectResponse = (chunk: Buffer) => {
         receivedBytes += chunk.length;
+        if (outputCollector) {
+          try {
+            outputCollector.push(chunk);
+          } catch (error) {
+            finish(() => reject(error));
+          }
+          return;
+        }
+        // Bound the raw response before buffering and parsing it. The adapter
+        // applies the smaller display limit after decoding successful reads.
         if (receivedBytes > maxResponseBytes) {
           finish(() =>
             reject(
@@ -144,7 +161,12 @@ export class SocketTransport {
           }
           try {
             resolve(
-              parseResponse(Buffer.concat(chunks).toString("utf8"), request.id),
+              outputCollector
+                ? outputCollector.finish(request.id)
+                : parseResponse(
+                    Buffer.concat(chunks).toString("utf8"),
+                    request.id,
+                  ),
             );
           } catch (error) {
             reject(error);
@@ -152,6 +174,141 @@ export class SocketTransport {
         }),
       );
     });
+  }
+}
+
+/** Keeps output reads bounded while retaining the newest part of a JSON text field. */
+class OutputResponseCollector {
+  private readonly decoder = new StringDecoder("utf8");
+  private header = "";
+  private prefix = "";
+  private tail = "";
+  private pendingText = "";
+  private suffix = "";
+  private inText = false;
+  private escaped = false;
+  private unicodeDigits = 0;
+  private unicodeValue = "";
+  private textClosed = false;
+  private droppedCharacters = false;
+
+  push(chunk: Buffer): void {
+    this.consume(this.decoder.write(chunk));
+  }
+
+  finish(requestId: string): RawResponse {
+    this.consume(this.decoder.end());
+    if (!this.inText) return parseResponse(this.header, requestId);
+    if (!this.textClosed)
+      throw new InvalidHerdrResponseError("Herdr の応答形式が不正です。");
+    const payload = `${this.prefix}${JSON.stringify(this.tail).slice(1, -1)}"${this.suffix}`;
+    const response = parseResponse(payload, requestId);
+    if (this.droppedCharacters && "result" in response) {
+      const read = response.result.read;
+      if (
+        typeof read === "object" &&
+        read !== null &&
+        !Array.isArray(read) &&
+        "truncated" in read &&
+        typeof read.truncated === "boolean"
+      )
+        (read as Record<string, unknown>).truncated = true;
+    }
+    return response;
+  }
+
+  private consume(decoded: string): void {
+    if (!decoded) return;
+    if (!this.inText && !this.textClosed) {
+      this.header += decoded;
+      const match = /"text"\s*:\s*"/.exec(this.header);
+      if (!match) {
+        if (Buffer.byteLength(this.header, "utf8") > maxOutputHeaderBytes)
+          throw new InvalidHerdrResponseError("Herdr の応答形式が不正です。");
+        return;
+      }
+      const markerEnd = match.index + match[0].length;
+      const accumulated = this.header;
+      this.prefix = this.header.slice(0, markerEnd);
+      this.inText = true;
+      decoded = accumulated.slice(markerEnd);
+      this.header = "";
+    }
+
+    let index = 0;
+    while (index < decoded.length) {
+      if (this.textClosed) {
+        this.suffix += decoded.slice(index);
+        if (Buffer.byteLength(this.suffix, "utf8") > maxResponseBytes)
+          throw new InvalidHerdrResponseError(
+            "Herdr の応答が許容サイズを超えました。",
+          );
+        break;
+      }
+      if (!this.escaped && this.unicodeDigits === 0) {
+        // eslint-disable-next-line no-control-regex -- JSON strings must reject raw control characters.
+        const special = /[\\"\x00-\x1f]/g;
+        special.lastIndex = index;
+        const match = special.exec(decoded);
+        if (!match) {
+          this.appendText(decoded.slice(index));
+          break;
+        }
+        if (match.index > index)
+          this.appendText(decoded.slice(index, match.index));
+        index = match.index;
+      }
+
+      const character = decoded[index]!;
+      index += 1;
+      if (this.unicodeDigits > 0) {
+        if (!/[0-9a-f]/i.test(character))
+          throw new InvalidHerdrResponseError("Herdr の応答形式が不正です。");
+        this.unicodeValue += character;
+        this.unicodeDigits -= 1;
+        if (this.unicodeDigits === 0)
+          this.appendText(String.fromCharCode(parseInt(this.unicodeValue, 16)));
+      } else if (this.escaped) {
+        this.escaped = false;
+        if (character === "u") {
+          this.unicodeDigits = 4;
+          this.unicodeValue = "";
+        } else {
+          const escaped: Record<string, string> = {
+            '"': '"',
+            "\\": "\\",
+            "/": "/",
+            b: "\b",
+            f: "\f",
+            n: "\n",
+            r: "\r",
+            t: "\t",
+          };
+          const value = escaped[character];
+          if (value === undefined)
+            throw new InvalidHerdrResponseError("Herdr の応答形式が不正です。");
+          this.appendText(value);
+        }
+      } else if (character === "\\") {
+        this.escaped = true;
+      } else if (character === '"') {
+        this.textClosed = true;
+      } else {
+        if (character.charCodeAt(0) < 32)
+          throw new InvalidHerdrResponseError("Herdr の応答形式が不正です。");
+        this.appendText(character);
+      }
+    }
+    this.tail += this.pendingText;
+    this.pendingText = "";
+    if (this.tail.length > retainedOutputCharacters) {
+      this.tail = this.tail.slice(-retainedOutputCharacters);
+      this.droppedCharacters = true;
+    }
+  }
+
+  private appendText(character: string): void {
+    this.pendingText += character;
   }
 }
 
